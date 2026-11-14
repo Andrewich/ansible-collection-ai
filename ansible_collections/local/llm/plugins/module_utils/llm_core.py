@@ -908,7 +908,20 @@ def split_text(text, max_chars, on_too_long):
     return chunks or [text[:max_chars]]
 
 
+def _dedupe(items):
+    seen, result = [], []
+    for item in items:
+        marker = json.dumps(item, sort_keys=True, ensure_ascii=False)
+        if marker not in seen:
+            seen.append(marker)
+            result.append(item)
+    return result
+
+
 def _merge_values(first, second, mode):
+    """first  - first non-null value wins;
+    concat - plain list concatenation, duplicates kept;
+    deep_merge - recursive dictionaries and de-duplicated lists."""
     if first is None:
         return second
     if second is None:
@@ -918,14 +931,10 @@ def _merge_values(first, second, mode):
         for key, value in second.items():
             merged[key] = _merge_values(merged.get(key), value, mode)
         return merged
-    if isinstance(first, list) and isinstance(second, list) and mode in ("concat", "deep_merge"):
-        seen, combined = [], []
-        for item in first + second:
-            marker = json.dumps(item, sort_keys=True, ensure_ascii=False)
-            if marker not in seen:
-                seen.append(marker)
-                combined.append(item)
-        return combined
+    if mode == "deep_merge" and isinstance(first, list) and isinstance(second, list):
+        return _dedupe(first + second)
+    if mode == "concat" and isinstance(first, list) and isinstance(second, list):
+        return first + second
     return first
 
 
@@ -1008,7 +1017,7 @@ def cache_read(cache_dir, key):
         return None
     if not isinstance(payload, dict) or payload.get("v") != CACHE_FORMAT:
         return None
-    if not isinstance(payload.get("data"), (dict, list)):
+    if not isinstance(payload.get("chunks"), list):
         return None
     return payload
 
@@ -1359,37 +1368,176 @@ def build_envelope(parsed, schema):
     }, []
 
 
-def finalize(envelope, schema, text, params):
-    """Apply the quality policies to an envelope, whether fresh or from the cache."""
-    data, missing = strip_nulls(envelope.get("data"), schema)
-    normalized = envelope.get("normalized") or []
-    unverified, checked, grounded = _quality_gate(
-        data, missing, schema, text, normalized, params
-    )
+def checkable_paths(data, schema, path="", out=None):
+    """Paths of leaves that grounding can actually verify (no nulls, no booleans)."""
+    if out is None:
+        out = []
+    if data is None:
+        return out
+    if isinstance(data, dict):
+        properties = (schema or {}).get("properties") or {}
+        for key, value in data.items():
+            checkable_paths(value, properties.get(key) or {}, _path_join(path, key), out)
+        return out
+    if isinstance(data, list):
+        items = (schema or {}).get("items") or {}
+        for index, value in enumerate(data):
+            checkable_paths(value, items, "%s[%d]" % (path, index), out)
+        return out
+    if isinstance(data, bool):
+        return out
+    out.append(path)
+    return out
+
+
+def set_path(data, path, value):
+    parts = path.split(".") if path else []
+    current = data
+    for index, part in enumerate(parts):
+        name, _, bracket = part.partition("[")
+        last = index == len(parts) - 1
+        if name:
+            if not isinstance(current, dict):
+                return
+            if last and not bracket:
+                current[name] = value
+                return
+            current = current[name]
+        if bracket:
+            position = int(bracket.rstrip("]"))
+            if last:
+                current[position] = value
+                return
+            current = current[position]
+
+
+def get_path(data, path):
+    current = data
+    for part in path.split(".") if path else []:
+        name, _, index = part.partition("[")
+        if name:
+            if not isinstance(current, dict) or name not in current:
+                return None
+            current = current[name]
+        if index:
+            try:
+                current = current[int(index.rstrip("]"))]
+            except (IndexError, TypeError, ValueError):
+                return None
+    return current
+
+
+def finalize_chunks(envelopes, chunks, schema, params):
+    """Ground each chunk against its own text, then merge the surviving values.
+
+    A value is accepted when the chunk that produced it also contained it. Evidence from a
+    discarded tail or from another chunk cannot vouch for it, and a bad answer in chunk one
+    does not evict the good answer from chunk two: grounded candidates are preferred during
+    the merge, not after it.
+    """
+    per_chunk, grounded_parts, evidence = [], [], {}
+    provenance = {"normalized": [], "coerced": [], "rejected": []}
+
+    for envelope in envelopes:
+        for key in provenance:
+            provenance[key].extend(envelope.get(key) or [])
+
+    for envelope, chunk in zip(envelopes, chunks):
+        per_chunk.append(envelope.get("data"))
+        chunk_data, _missing = strip_nulls(envelope.get("data"), schema)
+        if params["grounding"] == "none":
+            grounded_parts.append(chunk_data)
+            continue
+        unverified, _checked, _grounded = ground(
+            chunk_data, schema, chunk, original_values(envelope.get("normalized"))
+        )
+        bad = set(item["path"] for item in unverified)
+        for path in checkable_paths(chunk_data, schema):
+            evidence[path] = evidence.get(path, False) or (path not in bad)
+        cleaned, _missing_after = strip_nulls(drop_paths(chunk_data, schema, bad), schema)
+        grounded_parts.append(cleaned)
+
+    merged = merge_results(per_chunk, params["merge"])
+    if params["grounding"] != "none":
+        grounded_merged = merge_results(grounded_parts, params["merge"])
+        for path in checkable_paths(merged, schema):
+            if not evidence.get(path):
+                continue
+            grounded_value = get_path(grounded_merged, path)
+            if grounded_value is not None:
+                set_path(merged, path, grounded_value)
+
+    paths = checkable_paths(merged, schema)
+    unverified = [
+        {"path": path, "value": get_path(merged, path)}
+        for path in paths
+        if evidence.get(path) is False
+    ]
+    checked = len(paths)
+    grounded = checked - len(unverified)
+
+    policy = params.get("on_ungrounded") or "drop"
+    if unverified and policy == "fail":
+        raise ContractError(
+            "ungrounded_values",
+            "values not found in the source: %s"
+            % ", ".join("%s=%r" % (item["path"], item["value"]) for item in unverified),
+            None,
+        )
+
     dropped = 0
-    if unverified and (params.get("on_ungrounded") or "drop") == "drop":
-        data, missing_now = drop_unverified(data, schema, unverified)
-        missing = sorted(set(missing) | set(missing_now))
+    if unverified and policy == "drop":
+        doomed = set(item["path"] for item in unverified)
+        data, missing = strip_nulls(drop_paths(merged, schema, doomed), schema)
+        missing = sorted(set(missing) | doomed)
         dropped = len(unverified)
+    else:
+        data, missing = strip_nulls(merged, schema)
+        missing = sorted(set(missing))
+
+    if params["on_missing"] == "fail" and missing:
+        raise ContractError("missing_fields", "no value for: %s" % ", ".join(missing), None)
+    if params["min_grounded"]:
+        if checked == 0:
+            raise ContractError(
+                "grounding_failed",
+                "min_grounded=%s was requested but there is nothing to verify: every value "
+                "was missing, dropped or not checkable" % params["min_grounded"],
+                None,
+            )
+        ratio = grounded / float(checked)
+        if ratio < params["min_grounded"]:
+            raise ContractError(
+                "grounding_failed",
+                "only %.0f%% of the %d checked values were found in the source (threshold %.0f%%)"
+                % (ratio * 100, checked, params["min_grounded"] * 100),
+                None,
+            )
     return data, {
         "missing": missing,
         "unverified": unverified,
         "checked": checked,
         "grounded": grounded,
         "dropped": dropped,
-        "normalized": normalized,
-        "coerced": envelope.get("coerced") or [],
-        "rejected": envelope.get("rejected") or [],
+        "normalized": provenance["normalized"],
+        "coerced": provenance["coerced"],
+        "rejected": provenance["rejected"],
     }
 
 
-def _cache_hit(cache_dir, key, schema):
+def _cache_hit(cache_dir, key, schema, chunks):
     payload = cache_read(cache_dir, key)
     if payload is None:
         return None
-    if validate_instance(payload["data"], schema):
-        return None  # a tampered or stale entry is a miss, not an answer
-    return payload
+    envelopes = payload.get("chunks")
+    if not isinstance(envelopes, list) or len(envelopes) != len(chunks):
+        return None
+    for envelope in envelopes:
+        if not isinstance(envelope, dict) or not isinstance(envelope.get("data"), (dict, list)):
+            return None
+        if validate_instance(envelope["data"], schema):
+            return None  # a tampered or stale entry is a miss, not an answer
+    return envelopes
 
 
 def extract(params):
@@ -1400,7 +1548,6 @@ def extract(params):
     schema = prepared["schema"]
     text = prepared["text"]
     chunks = prepared["chunks"]
-    sent_text = "".join(chunks)
 
     meta = {
         "ok": False,
@@ -1430,10 +1577,10 @@ def extract(params):
     cache_dir = plan["cache"]["dir"]
     cache_key = plan["cache"]["key"]
     if params.get("cache"):
-        cached = _cache_hit(cache_dir, cache_key, schema)
+        cached = _cache_hit(cache_dir, cache_key, schema, chunks)
         if cached is not None:
             try:
-                data, info = finalize(cached, schema, sent_text, params)
+                data, info = finalize_chunks(cached, chunks, schema, params)
             except ContractError as exc:
                 exc.plan = plan
                 raise
@@ -1446,11 +1593,12 @@ def extract(params):
     gbnf = build_gbnf(schema, strict_enum=params["strict_enum"])
     attempts_allowed = plan["inference"]["attempts"]
 
-    results = []
+    envelopes = []
     last_raw = None
     last_errors = []
     for chunk in chunks:
-        best = None
+        best_envelope = None
+        best_parsed = None
         best_score = -1
         for attempt in range(attempts_allowed):
             # A retry has to change the sampling, otherwise it is byte-identical at
@@ -1478,13 +1626,13 @@ def extract(params):
                     last_errors.append("output was truncated by max_tokens")
                 continue
             envelope, last_errors = build_envelope(parsed, schema)
-            score = _count_leaves(parsed)
             if envelope is not None:
-                best = parsed
+                best_envelope = envelope
                 break
+            score = _count_leaves(parsed)
             if score > best_score:
-                best, best_score = parsed, score
-        if best is None:
+                best_parsed, best_score = parsed, score
+        if best_envelope is None:
             if params["on_invalid"] == "return_raw":
                 meta.update(ok=False, raw_output=last_raw, errors=last_errors,
                             elapsed_ms=int((time.time() - started) * 1000))
@@ -1492,22 +1640,10 @@ def extract(params):
             code = "invalid_json" if last_errors and last_errors[0].startswith("model output") \
                 else "schema_violation"
             raise ContractError(code, "; ".join(last_errors) or "no parseable answer", plan)
-        results.append(best)
-
-    merged = merge_results(results, params["merge"])
-    envelope, errors = build_envelope(merged, schema)
-    if envelope is None:
-        if params["on_invalid"] == "return_raw":
-            meta.update(ok=False, raw_output=last_raw, errors=errors,
-                        elapsed_ms=int((time.time() - started) * 1000))
-            return {}, meta
-        raise ContractError("schema_violation", "; ".join(errors), plan)
-
-    if params.get("debug"):
-        meta["projection_schema"] = projection_schema(schema)
+        envelopes.append(best_envelope)
 
     try:
-        data, info = finalize(envelope, schema, sent_text, params)
+        data, info = finalize_chunks(envelopes, chunks, schema, params)
     except ContractError as exc:
         exc.plan = plan
         raise
@@ -1515,9 +1651,9 @@ def extract(params):
 
     if params.get("debug"):
         meta["raw_output"] = last_raw
+        meta["projection_schema"] = projection_schema(schema)
     if params.get("cache") and not params.get("check_mode"):
-        written = cache_write(cache_dir, cache_key, envelope)
-        if not written:
+        if not cache_write(cache_dir, cache_key, {"v": CACHE_FORMAT, "chunks": envelopes}):
             meta["cache_written"] = False
     elif params.get("check_mode"):
         meta["cache_written"] = False

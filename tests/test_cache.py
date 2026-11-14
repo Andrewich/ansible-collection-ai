@@ -84,7 +84,7 @@ class CacheSafetyTest(unittest.TestCase):
         path = os.path.join(self.cache_dir, name)
         with open(path, encoding="utf-8") as handle:
             payload = json.load(handle)
-        payload["data"]["surprise"] = "value"
+        payload["chunks"][0]["data"]["surprise"] = "value"
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle)
         data, meta = L.extract(params(cache=True, cache_dir=self.cache_dir,

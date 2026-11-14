@@ -298,7 +298,7 @@ class ChunkingTest(unittest.TestCase):
         try:
             data, meta = L.extract(
                 params(text=text, max_input_chars=120, on_too_long="split",
-                       merge="concat", mock_response=full(nics=["n1"]))
+                       merge="deep_merge", mock_response=full(nics=["n1"]))
             )
         finally:
             L.make_backend = original_make
@@ -310,8 +310,12 @@ class ChunkingTest(unittest.TestCase):
         self.assertEqual(
             L.merge_results([{"a": 1}, {"a": 2}], "first")["a"], 1
         )
+        # concat keeps duplicates; deep_merge de-duplicates and recurses.
         self.assertEqual(
-            L.merge_results([{"n": ["x"]}, {"n": ["x", "y"]}], "concat")["n"], ["x", "y"]
+            L.merge_results([{"n": ["x"]}, {"n": ["x", "y"]}], "concat")["n"], ["x", "x", "y"]
+        )
+        self.assertEqual(
+            L.merge_results([{"n": ["x"]}, {"n": ["x", "y"]}], "deep_merge")["n"], ["x", "y"]
         )
         self.assertEqual(
             L.merge_results([{"o": {"a": 1}}, {"o": {"b": 2}}], "deep_merge")["o"],
