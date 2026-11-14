@@ -31,7 +31,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-CORE_VERSION = "llm_extract/2.0"
+CORE_VERSION = "llm_extract/2.1"
 FIELD_TYPES = ("string", "integer", "number", "boolean", "list")
 SCALAR_TYPES = ("string", "integer", "number", "boolean")
 FIELD_KEYS = frozenset(["name", "type", "description", "enum"])
