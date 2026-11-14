@@ -1,0 +1,95 @@
+[
+  {
+    "@odata.context": "/redfish/v1/$metadata#ComputerSystem.ComputerSystem",
+    "@odata.id": "/redfish/v1/Systems/1",
+    "@odata.type": "#ComputerSystem.v1_20_0.ComputerSystem",
+    "AssetTag": "Unknown",
+    "Bios": {"@odata.id": "/redfish/v1/Systems/1/Bios"},
+    "BiosVersion": "U46 v2.10 (05/22/2024)",
+    "Boot": {"BootSourceOverrideEnabled": "Disabled"},
+    "Description": "Computer System",
+    "HostName": "db-prod-02",
+    "Id": "1",
+    "Links": {"Chassis": [{"@odata.id": "/redfish/v1/Chassis/1"}]},
+    "Manufacturer": "HPE",
+    "MemorySummary": {
+      "Status": {"Health": "OK", "State": "Enabled"},
+      "TotalSystemMemoryGiB": 1024
+    },
+    "Model": "ProLiant DL380 Gen11",
+    "Name": "System",
+    "PartNumber": "P52558-001",
+    "PowerState": "On",
+    "ProcessorSummary": {
+      "CoreCount": 64,
+      "Count": 2,
+      "LogicalProcessorCount": 128,
+      "Model": "INTEL(R) XEON(R) PLATINUM 8568Y+",
+      "Status": {"Health": "OK", "State": "Enabled"}
+    },
+    "SKU": "P52558-B21",
+    "SerialNumber": "CZJ2040KZ9",
+    "Status": {"Health": "OK", "State": "Enabled"},
+    "SystemType": "Physical",
+    "UUID": "37333036-3138-5A43-4A32-3034304B5A39",
+    "Oem": {
+      "Hpe": {
+        "@odata.type": "#HpeServer.v2_0_0.HpeServer",
+        "AggregateHealthStatus": {
+          "AggregateHealth": "OK",
+          "Cluster": "OK",
+          "Fan": "OK",
+          "Memory": "OK",
+          "Network": "OK",
+          "PowerSupplies": "OK",
+          "Processor": "OK",
+          "Storage": "OK"
+        },
+        "DeviceDiscoveryComplete": {"DeviceDiscovery": "vMainDeviceDiscoveryComplete"},
+        "IntelligentProvisioningIndex": "14",
+        "ServerName": "DL380-Gen11",
+        "ServerFQDN": "db-prod-02.corp.local",
+        "SmartStorageConfig": [{"@odata.id": "/redfish/v1/Systems/1/SmartStorageConfig/1"}]
+      }
+    }
+  },
+  {
+    "@odata.context": "/redfish/v1/$metadata#Manager.Manager",
+    "@odata.id": "/redfish/v1/Managers/1",
+    "@odata.type": "#Manager.v1_19_0.Manager",
+    "DateTime": "2024-11-05T11:04:12+00:00",
+    "Description": "BMC",
+    "FirmwareVersion": "1.58 Jul 15 2024",
+    "Id": "1",
+    "ManagerType": "BMC",
+    "Model": "iLO 6",
+    "Name": "Manager",
+    "Status": {"Health": "OK", "State": "Enabled"},
+    "UUID": "37333036-3138-5A43-4A32-3034304B5A39",
+    "Oem": {
+      "Hpe": {
+        "@odata.type": "#HpeiLO.v2_15_0.HpeiLO",
+        "FirmwareVersion": "1.58 Jul 15 2024",
+        "Language": "en",
+        "ManagerFirmwareVersion": "iLO 6 v1.58",
+        "OemHpeLanguage": "en",
+        "WebServerCertificate": {"SerialNumber": "0A:3F:11:B2"}
+      }
+    }
+  },
+  {
+    "@odata.context": "/redfish/v1/$metadata#Bios.Bios",
+    "@odata.id": "/redfish/v1/Systems/1/Bios",
+    "@odata.type": "#Bios.v1_2_0.Bios",
+    "AttributeRegistry": "BiosAttributeRegistryU46.v2_10_0",
+    "Attributes": {
+      "BootMode": "Uefi",
+      "ProcHyperthreading": "Enabled",
+      "PowerRegulator": "DynamicPowerSavings",
+      "Sriov": "Enabled",
+      "SystemBiosVersion": "U46 v2.10 (05/22/2024)"
+    },
+    "Id": "Bios",
+    "Name": "BIOS Configuration Current Settings"
+  }
+]

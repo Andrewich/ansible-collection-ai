@@ -1,0 +1,12 @@
+# Runtime for llm_extract. The version is pinned because the measurement results
+# (and the generated GBNF grammar behaviour) were verified against exactly this build.
+llama-cpp-python==0.3.36
+
+# Optional, only for `backend: server` when the server is started with
+# `python -m llama_cpp.server` instead of the llama.cpp binary.
+uvicorn>=0.30
+fastapi>=0.110
+pydantic>=2.7
+pydantic-settings>=2.2
+sse-starlette>=2.0
+starlette-context>=0.3

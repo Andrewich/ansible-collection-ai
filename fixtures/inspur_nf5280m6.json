@@ -1,0 +1,84 @@
+[
+  {
+    "@odata.context": "/redfish/v1/$metadata#ComputerSystem.ComputerSystem",
+    "@odata.id": "/redfish/v1/Systems/1",
+    "@odata.type": "#ComputerSystem.v1_11_0.ComputerSystem",
+    "AssetTag": "N/A",
+    "BiosVersion": "3.12.06",
+    "Description": "Computer System",
+    "Id": "1",
+    "Links": {"Chassis": [{"@odata.id": "/redfish/v1/Chassis/1"}]},
+    "Manufacturer": "Inspur",
+    "MemorySummary": {
+      "Status": {"Health": "OK", "State": "Enabled"},
+      "TotalSystemMemoryGiB": "1024 GB"
+    },
+    "Model": "NF5280M6",
+    "Name": "System",
+    "PartNumber": "N/A",
+    "PowerState": "On",
+    "ProcessorSummary": {
+      "CoreCount": "48",
+      "Count": "2",
+      "Model": "Intel(R) Xeon(R) Gold 6330 CPU @ 2.00GHz",
+      "Status": {"Health": "OK", "State": "Enabled"}
+    },
+    "SKU": "N/A",
+    "SerialNumber": "N/A",
+    "Status": {"Health": "Warning", "State": "Enabled"},
+    "SystemType": "Physical",
+    "UUID": "00000000-0000-0000-0000-0025B500A1C2",
+    "Oem": {
+      "Public": {
+        "@odata.type": "#Public.v1_0_0.ProductInfo",
+        "ProductName": "浪潮 NF5280M6",
+        "ProductNameEn": "Inspur NF5280M6",
+        "SerialNumber": "2288H-V6-0123456789",
+        "Barcode": "2288H-V6-0123456789",
+        "SystemHealth": "Warning",
+        "NodeId": "N/A",
+        "Description": "&lt;div&gt;2U rack server&lt;/div&gt;&lt;div&gt;PSU1: 800W&lt;/div&gt;&lt;div&gt;PSU2: &lt;b&gt;absent&lt;/b&gt;&lt;/div&gt;",
+        "PowerSupplyInfo": [
+          {"Name": "PSU1", "Presence": "Present", "Model": "PS-2801-1A", "Health": "OK"},
+          {"Name": "PSU2", "Presence": "Absent", "Model": "N/A", "Health": "N/A"}
+        ]
+      }
+    }
+  },
+  {
+    "@odata.context": "/redfish/v1/$metadata#Manager.Manager",
+    "@odata.id": "/redfish/v1/Managers/1",
+    "@odata.type": "#Manager.v1_11_0.Manager",
+    "Description": "Manager",
+    "FirmwareVersion": "3.12.06",
+    "Id": "1",
+    "ManagerType": "BMC",
+    "Model": "BMC",
+    "Name": "Manager",
+    "Status": {"Health": "Warning", "State": "Enabled"},
+    "UUID": "00000000-0000-0000-0000-0025B500A1C2",
+    "Oem": {
+      "Public": {
+        "ManagerFirmwareVersion": "BMC 3.12.06",
+        "ManagerType": "BMC",
+        "Description": "浪潮 BMC"
+      }
+    }
+  },
+  {
+    "@odata.context": "/redfish/v1/$metadata#Chassis.Chassis",
+    "@odata.id": "/redfish/v1/Chassis/1",
+    "@odata.type": "#Chassis.v1_17_0.Chassis",
+    "ChassisType": "RackMount",
+    "Id": "1",
+    "Manufacturer": "Inspur",
+    "Model": "NF5280M6",
+    "Name": "Chassis",
+    "PartNumber": "N/A",
+    "PowerState": "On",
+    "SerialNumber": "2288H-V6-0123456789",
+    "SKU": "N/A",
+    "Status": {"Health": "Warning", "State": "Enabled"},
+    "Thermal": {"@odata.id": "/redfish/v1/Chassis/1/Thermal"}
+  }
+]

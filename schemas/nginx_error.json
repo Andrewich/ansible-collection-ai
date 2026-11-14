@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["severity", "category", "upstream", "client_ip"],
+  "properties": {
+    "severity": {
+      "type": ["string", "null"],
+      "enum": ["critical", "error", "warning", "info", null],
+      "description": "Severity of the log fragment"
+    },
+    "category": {
+      "type": ["string", "null"],
+      "enum": ["upstream_timeout", "connection_refused", "tls", "request_invalid", "other", null],
+      "description": "Closest failure category"
+    },
+    "upstream": {
+      "type": ["string", "null"],
+      "description": "Upstream name, for example backend_app_01"
+    },
+    "client_ip": {
+      "type": ["string", "null"],
+      "description": "Client address from the log line"
+    }
+  }
+}

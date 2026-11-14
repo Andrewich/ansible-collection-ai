@@ -1,0 +1,10 @@
+Manufacturer = Dell Inc.
+Model = PowerEdge R750
+SerialNumber = 7XK2P13
+BiosVersion = 2.9.4
+FirmwareVersion = 6.10.80.00
+ProcessorSummary.CoreCount = 64
+ProcessorSummary.Model = Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
+MemorySummary.TotalSystemMemoryGiB = 512
+PowerState = On
+Status.Health = OK

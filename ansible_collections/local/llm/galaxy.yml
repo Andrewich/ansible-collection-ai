@@ -1,0 +1,19 @@
+---
+namespace: local
+name: llm
+version: 0.2.0
+readme: README.md
+authors:
+  - Sysadmin toolkit
+description: >-
+  Turn unstructured text into validated JSON with a small local GGUF model.
+  No external service, no data egress.
+license:
+  - GPL-3.0-or-later
+tags:
+  - llm
+  - gguf
+  - extraction
+  - redfish
+repository: https://example.invalid/local/llm
+dependencies: {}

@@ -1,0 +1,8 @@
+.venv/
+.pylib/
+.models/
+vendor/
+.tmp/
+.ansible/
+__pycache__/
+*.pyc

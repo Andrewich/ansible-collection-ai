@@ -1,0 +1,100 @@
+[
+  {
+    "@odata.context": "/redfish/v1/$metadata#ComputerSystem.ComputerSystem",
+    "@odata.id": "/redfish/v1/Systems/System.Embedded.1",
+    "@odata.type": "#ComputerSystem.v1_19_0.ComputerSystem",
+    "Actions": {
+      "#ComputerSystem.Reset": {
+        "ResetType@Redfish.AllowableValues": ["On", "ForceOff", "GracefulShutdown", "ForceRestart", "Nmi", "PowerCycle"],
+        "target": "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
+      },
+      "Oem": {
+        "#DellManager.ClearJobQueue": {"target": "/redfish/v1/Managers/iDRAC.Embedded.1/Oem/Dell/DellJobService/Actions/DellJobService.DeleteJobQueue"}
+      }
+    },
+    "AssetTag": "",
+    "Bios": {"@odata.id": "/redfish/v1/Systems/System.Embedded.1/Bios"},
+    "BiosVersion": "2.9.4",
+    "Boot": {"BootOrder": ["BootSeq.1", "BootSeq.2", "NIC.PxeDevice.1-1", "RAID.Integrated.1-1"], "BootSourceOverrideEnabled": "Disabled"},
+    "Description": "Computer System",
+    "HostName": "esxi-r750-04",
+    "Id": "System.Embedded.1",
+    "Links": {
+      "Chassis": [{"@odata.id": "/redfish/v1/Chassis/System.Embedded.1"}],
+      "ManagedBy": [{"@odata.id": "/redfish/v1/Managers/iDRAC.Embedded.1"}]
+    },
+    "Manufacturer": "Dell Inc.",
+    "Memory": {"@odata.id": "/redfish/v1/Systems/System.Embedded.1/Memory"},
+    "MemorySummary": {
+      "Status": {"Health": "OK", "HealthRollup": "OK", "State": "Enabled"},
+      "TotalSystemMemoryGiB": 512
+    },
+    "Model": "PowerEdge R750",
+    "Name": "System",
+    "PartNumber": "0P4XXYA00",
+    "PowerState": "On",
+    "ProcessorSummary": {
+      "CoreCount": 64,
+      "Count": 2,
+      "LogicalProcessorCount": 128,
+      "Model": "Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz",
+      "Status": {"Health": "OK", "HealthRollup": "OK", "State": "Enabled"}
+    },
+    "SKU": "7XK2P13",
+    "SerialNumber": "7XK2P13",
+    "Status": {"Health": "OK", "HealthRollup": "OK", "State": "Enabled"},
+    "Storage": {"@odata.id": "/redfish/v1/Systems/System.Embedded.1/Storage"},
+    "SystemType": "Physical",
+    "UUID": "4c4c4544-0042-5810-8051-b7c04f503358",
+    "Oem": {
+      "Dell": {
+        "@odata.type": "#DellSystem.v1_15_0.DellSystem",
+        "DellSystem": {
+          "BIOSReleaseDate": "08/12/2024",
+          "CMOS": null,
+          "FanSpeed": null,
+          "LastSystemInventoryTime": "2024-11-02T09:14:22+00:00",
+          "LastUpdateTime": "2024-11-02T09:19:05+00:00",
+          "PowerState": "On",
+          "SysMemTotalSize": 524288,
+          "SystemDescription": "PowerEdge R750\nBIOS 2.9.4\n2 x Intel Xeon Gold 6338\n512 GB DDR4",
+          "SystemGeneration": null,
+          "SystemRevision": "A02",
+          "SystemStatus": "OK",
+          "ServiceTag": "7XK2P13"
+        }
+      }
+    }
+  },
+  {
+    "@odata.context": "/redfish/v1/$metadata#Manager.Manager",
+    "@odata.id": "/redfish/v1/Managers/iDRAC.Embedded.1",
+    "@odata.type": "#Manager.v1_18_0.Manager",
+    "Actions": {"#Manager.Reset": {"target": "/redfish/v1/Managers/iDRAC.Embedded.1/Actions/Manager.Reset"}},
+    "DateTime": "2024-11-05T11:02:31+00:00",
+    "Description": "iDRAC",
+    "FirmwareVersion": "6.10.80.00",
+    "Id": "iDRAC.Embedded.1",
+    "Links": {
+      "ManagerForServers": [{"@odata.id": "/redfish/v1/Systems/System.Embedded.1"}],
+      "Oem": {"Dell": {"ManagerForChassis": [{"@odata.id": "/redfish/v1/Chassis/System.Embedded.1"}]}}
+    },
+    "ManagerType": "BMC",
+    "Model": "16G Monolithic",
+    "Name": "Manager",
+    "NetworkProtocol": {"@odata.id": "/redfish/v1/Managers/iDRAC.Embedded.1/NetworkProtocol"},
+    "Status": {"Health": "OK", "HealthRollup": "OK", "State": "Enabled"},
+    "UUID": "4c4c4544-0042-5810-8051-b7c04f503358",
+    "Oem": {
+      "Dell": {
+        "DellManager": {
+          "LastResetTime": "2024-09-30T18:22:04+00:00",
+          "ManagerFirmwareVersion": "6.10.80.00",
+          "ManagerType": "iDRAC",
+          "RecentVersions": "5.10.50.00, 6.00.30.00",
+          "SystemLockdown": "Disabled"
+        }
+      }
+    }
+  }
+]

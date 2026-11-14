@@ -1,0 +1,234 @@
+---
+# End-to-end check of llm_extract: four domains, one module, no code changes between them.
+#
+#   ./scripts/run-playbook.sh playbooks/introspect_llm_extract.yml
+#
+# Real model for the Redfish case, mock backend for the other domains so the playbook
+# stays fast and deterministic.
+#
+- name: Contract and behaviour of llm_extract
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    model_path: "{{ llm_model }}"
+    redfish_fields: "{{ lookup('file', playbook_dir + '/../vars/redfish_fields.yml') | from_yaml }}"
+    nginx_schema: "{{ lookup('file', playbook_dir + '/../schemas/nginx_error.json') | from_json }}"
+    cache_dir: "{{ playbook_dir }}/../.tmp/llm-cache"
+
+  tasks:
+    - name: 1. Raw Redfish payload is far over the budget of a 350M model
+      local.llm.llm_extract:
+        src: "{{ playbook_dir }}/../fixtures/dell_r750.json"
+        prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
+        fields: "{{ redfish_fields }}"
+        model_path: "{{ model_path }}"
+      register: raw_payload
+      ignore_errors: true
+
+    - name: The budget guard refuses instead of silently truncating
+      assert:
+        that:
+          - raw_payload.error_code == 'input_too_long'
+          - raw_payload.plan.budget.fits == false
+          - raw_payload.plan.budget.max_input_chars == 1200
+          - raw_payload.plan.text.chars > 1200
+
+    # Compaction is deliberately outside the module: the payload is flattened to
+    # "path = value" lines by whatever the caller prefers (jq, a filter, a script).
+    # 294 characters are enough for the 350M model to get all ten facts right.
+    - name: 2. Pre-compacted payload is extracted with the real model
+      local.llm.llm_extract:
+        src: "{{ playbook_dir }}/../fixtures/dell_r750_compact.txt"
+        prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
+        fields: "{{ redfish_fields }}"
+        model_path: "{{ model_path }}"
+        backend: python
+        n_threads: 2
+        cache: false
+      register: extracted
+
+    - name: Facts are correct, grounded and free of nulls
+      assert:
+        that:
+          - extracted.llm.ok == true
+          - extracted.llm.missing == []
+          - extracted.llm.unverified == []
+          - extracted.llm.attempts == 1
+          - extracted.ansible_facts.llm_result.vendor == 'Dell'
+          - extracted.ansible_facts.llm_result.model == 'PowerEdge R750'
+          - extracted.ansible_facts.llm_result.serial == '7XK2P13'
+          - extracted.ansible_facts.llm_result.bios_version == '2.9.4'
+          - extracted.ansible_facts.llm_result.bmc_firmware == '6.10.80.00'
+          - extracted.ansible_facts.llm_result.cpu_cores_total == 64
+          - extracted.ansible_facts.llm_result.memory_gib == 512
+          - extracted.ansible_facts.llm_result.power_state == 'On'
+          - extracted.ansible_facts.llm_result.health == 'OK'
+        fail_msg: "extraction regressed: {{ extracted.ansible_facts.llm_result | default({}) }}"
+
+    - name: Vendor came from the source but was normalised onto the enum
+      assert:
+        that:
+          - extracted.llm.normalized | length == 1
+          - extracted.llm.normalized[0].from == 'Dell Inc.'
+          - extracted.llm.normalized[0].to == 'Dell'
+
+    - name: 3. Cache behaviour, on a clean cache directory
+      file:
+        path: "{{ cache_dir }}"
+        state: absent
+
+    - name: First run with caching enabled fills the cache
+      local.llm.llm_extract:
+        src: "{{ playbook_dir }}/../fixtures/dell_r750_compact.txt"
+        prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
+        fields: "{{ redfish_fields }}"
+        model_path: "{{ model_path }}"
+        backend: python
+        cache: true
+        cache_dir: "{{ cache_dir }}"
+      register: cached_first
+
+    - name: Second run does no inference at all
+      local.llm.llm_extract:
+        src: "{{ playbook_dir }}/../fixtures/dell_r750_compact.txt"
+        prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
+        fields: "{{ redfish_fields }}"
+        model_path: "{{ model_path }}"
+        backend: python
+        cache: true
+        cache_dir: "{{ cache_dir }}"
+      register: cached
+
+    - name: The cache returns the same facts without touching the model
+      assert:
+        that:
+          - cached_first.llm.cache_hit == false
+          - cached.llm.cache_hit == true
+          - cached.llm.attempts == 0
+          - cached.ansible_facts.llm_result == extracted.ansible_facts.llm_result
+
+    - name: 4. Different domain - nginx error line, nested schema, mock backend
+      local.llm.llm_extract:
+        text: >-
+          2024/11/05 11:02:31 [error] 1234#0: *88 upstream timed out (110: Connection timed
+          out) while reading response header from upstream, client: 10.1.2.3,
+          upstream: "http://backend_app_01"
+        prompt_file: "{{ playbook_dir }}/../prompts/nginx_error_classify.txt"
+        json_schema: "{{ nginx_schema }}"
+        backend: mock
+        # "upstream_timeout" is a label, not copied text, so it is expected to be reported
+        # as ungrounded; keep it instead of dropping it for this classification task.
+        on_ungrounded: keep
+        mock_response: >-
+          {"severity": "error", "category": "upstream_timeout",
+           "upstream": "backend_app_01", "client_ip": "10.1.2.3"}
+      register: nginx
+
+    - name: Nested schema is validated, copied values are grounded, the label is flagged
+      assert:
+        that:
+          - nginx.llm.ok == true
+          - nginx.ansible_facts.llm_result.severity == 'error'
+          - nginx.ansible_facts.llm_result.category == 'upstream_timeout'
+          - nginx.ansible_facts.llm_result.client_ip == '10.1.2.3'
+          # "upstream_timeout" is a label, the log says "upstream timed out": an honest
+          # grounding report shows it as not found instead of pretending otherwise.
+          - nginx.llm.unverified | map(attribute='path') | list == ['category']
+
+    - name: 5. Same module, third domain - support ticket classification
+      local.llm.llm_extract:
+        text: "После обновления прошивки сервер не включается, LED мигает оранжевым."
+        prompt_file: "{{ playbook_dir }}/../prompts/ticket_route.txt"
+        fields:
+          - name: category
+            type: string
+            enum: [hardware, network, software, other]
+          - name: priority
+            type: string
+            enum: [urgent, high, normal]
+        backend: mock
+        mock_response: '{"category": "hardware", "priority": "urgent"}'
+        grounding: none
+      register: ticket
+
+    - name: Classification is inference, so grounding is switched off for it
+      assert:
+        that:
+          - ticket.llm.ok == true
+          - ticket.ansible_facts.llm_result.category == 'hardware'
+          - ticket.ansible_facts.llm_result.priority == 'urgent'
+          - ticket.llm.unverified == []
+
+    - name: 6. A schema violation is reported, not silently accepted
+      local.llm.llm_extract:
+        text: "SerialNumber = 7XK2P13"
+        prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
+        fields: "{{ redfish_fields }}"
+        backend: mock
+        mock_response: '{"serial": 42, "vendor": "Acme"}'
+        on_invalid: fail
+      register: broken
+      ignore_errors: true
+
+    - name: Invalid answers carry a machine readable error code
+      assert:
+        that:
+          - broken.error_code in ['schema_violation', 'invalid_json']
+
+    # The reviewer's acid test: a document that simply does not contain most of the
+    # fields. The model must answer null, not copy a nearby value into the gap.
+    - name: 7. Document that lacks most of the fields
+      local.llm.llm_extract:
+        text: "SerialNumber = 7XK2P13\nMemory = 512 GB\n"
+        prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
+        fields: "{{ redfish_fields }}"
+        model_path: "{{ model_path }}"
+        backend: python
+        n_threads: 2
+        cache: false
+      register: sparse
+
+    - name: Invented values are detected, dropped and reported as missing
+      assert:
+        that:
+          - sparse.llm.ok == true
+          - sparse.ansible_facts.llm_result.serial == '7XK2P13'
+          - sparse.ansible_facts.llm_result.memory_gib == 512
+          - "'bios_version' not in sparse.ansible_facts.llm_result"
+          - "'health' not in sparse.ansible_facts.llm_result"
+          - sparse.llm.missing | length >= 5
+          - "'bios_version' in sparse.llm.missing"
+          # The model did produce plausible but invented values; the grounding check
+          # caught them and the default policy removed them instead of returning them.
+          - sparse.llm.unverified | length >= 1
+          - sparse.llm.dropped == sparse.llm.unverified | length
+        fail_msg: >-
+          the model filled absent fields instead of returning null:
+          {{ sparse.ansible_facts.llm_result | default({}) }}
+          missing={{ sparse.llm.missing | default([]) }}
+          unverified={{ sparse.llm.unverified | default([]) }}
+
+    - name: 8. Same engine as a lookup, no facts involved
+      set_fact:
+        looked_up: >-
+          {{ lookup('local.llm.llm_extract',
+                    'SerialNumber = 7XK2P13',
+                    prompt='Extract the serial number.',
+                    fields=[{'name': 'serial', 'type': 'string'}],
+                    backend='mock',
+                    mock_response='{"serial": "7XK2P13"}') }}
+
+    - name: The lookup returns the object itself
+      assert:
+        that:
+          - looked_up.serial == '7XK2P13'
+
+    - name: What the real run produced
+      debug:
+        msg:
+          - "facts: {{ extracted.ansible_facts.llm_result }}"
+          - "model: {{ extracted.llm.model.id }} ({{ extracted.llm.model.size }} bytes)"
+          - "tokens: {{ extracted.llm.tokens.in }} in / {{ extracted.llm.tokens.out }} out, {{ extracted.llm.elapsed_ms }} ms"
+          - "prompt sha: {{ extracted.llm.prompt_sha256[:16] }}…, input sha: {{ extracted.llm.input_sha256[:16] }}…"
+          - "cache hit on second run: {{ cached.llm.cache_hit }}"

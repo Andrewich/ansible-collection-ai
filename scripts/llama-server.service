@@ -1,0 +1,32 @@
+[Unit]
+Description=llama.cpp inference server for llm_extract (LFM2-350M-Extract)
+After=network.target
+Documentation=https://github.com/abetlen/llama-cpp-python
+
+[Service]
+Type=simple
+# Runs the HTTP server that ships inside the llama-cpp-python wheel, so no separately
+# compiled llama.cpp binary (and no GLIBCXX 3.4.30) is required.
+User=ansible-llm
+Group=ansible-llm
+WorkingDirectory=/opt/ansible-llm
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/ansible-llm/venv/bin/python -m llama_cpp.server \
+    --model /opt/ansible-llm/models/LFM2-350M-Extract-Q4_K_M.gguf \
+    --host 127.0.0.1 \
+    --port 8080 \
+    --n_ctx 4096 \
+    --n_threads 4
+Restart=on-failure
+RestartSec=3
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadOnlyPaths=/opt/ansible-llm
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
