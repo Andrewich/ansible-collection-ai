@@ -186,7 +186,7 @@ DEFAULTS = {
     "min_grounded": 0.0,
     "strict_enum": False, "cache": True, "cache_dir": None, "temperature": 0.0,
     "seed": 0, "max_tokens": 320, "retries": 1, "n_ctx": 4096, "n_threads": 0,
-    "timeout": 120, "mock_response": None, "debug": False,
+    "timeout": 120, "mock_response": None, "debug": False, "check_mode": False,
 }
 
 

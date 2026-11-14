@@ -24,6 +24,7 @@ import os
 import re
 import socket
 import ssl
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -100,6 +101,7 @@ KNOWN_PARAMS = frozenset(
         "on_too_long", "merge", "on_missing", "on_invalid", "grounding", "on_ungrounded",
         "min_grounded", "strict_enum", "cache", "cache_dir", "temperature", "seed",
         "max_tokens", "retries", "n_ctx", "n_threads", "timeout", "mock_response", "debug",
+        "check_mode",
     ]
 )
 
@@ -970,6 +972,8 @@ def build_cache_key(params, model_id, model_path, prompt_sha, schema_sha, input_
         str(params.get("grounding")),
         str(params.get("on_ungrounded")),
         str(params.get("max_input_chars")),
+        str(params.get("min_grounded")),
+        str(CACHE_FORMAT),
     ]
     for part in parts:
         digest.update(part.encode("utf-8"))
@@ -980,25 +984,61 @@ def build_cache_key(params, model_id, model_path, prompt_sha, schema_sha, input_
     return digest.hexdigest()
 
 
+CACHE_FORMAT = 2
+
+
+def cache_dir_usable(cache_dir):
+    """The cache directory must be ours and not group/world writable."""
+    try:
+        if not os.path.isdir(cache_dir):
+            os.makedirs(cache_dir, mode=0o700, exist_ok=True)
+        stat = os.stat(cache_dir)
+    except (IOError, OSError):
+        return False
+    if stat.st_uid != os.geteuid():
+        return False
+    return not stat.st_mode & 0o022
+
+
 def cache_read(cache_dir, key):
     try:
         with open(os.path.join(cache_dir, key + ".json"), "r", encoding="utf-8") as handle:
-            return json.load(handle)
+            payload = json.load(handle)
     except (IOError, OSError, ValueError):
         return None
+    if not isinstance(payload, dict) or payload.get("v") != CACHE_FORMAT:
+        return None
+    if not isinstance(payload.get("data"), (dict, list)):
+        return None
+    return payload
 
 
 def cache_write(cache_dir, key, payload):
+    """Write through a unique 0600 file and rename it into place."""
+    if not cache_dir_usable(cache_dir):
+        return False
+    path = os.path.join(cache_dir, key + ".json")
+    handle = None
+    temporary = None
     try:
-        os.makedirs(cache_dir, mode=0o700, exist_ok=True)
-        path = os.path.join(cache_dir, key + ".json")
-        temporary = path + ".tmp"
-        handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        handle, temporary = tempfile.mkstemp(prefix=".tmp-", dir=cache_dir)
+        os.fchmod(handle, 0o600)
         with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            handle = None
             json.dump(payload, stream, ensure_ascii=False, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, path)
+        return True
     except (IOError, OSError):
-        pass
+        if handle is not None:
+            os.close(handle)
+        if temporary and os.path.exists(temporary):
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1299,6 +1339,59 @@ def _quality_gate(data, missing, schema, text, normalized, params):
     return unverified, checked, grounded
 
 
+def build_envelope(parsed, schema):
+    """Validate model output and turn it into the cacheable, policy-free envelope."""
+    coerced, normalized, rejected = [], [], []
+    data = coerce_leaves(parsed, schema, out=coerced)
+    data = normalize_enums(data, schema, out=normalized)
+    data = reject_enum_mismatches(data, schema, out=rejected)
+    errors = validate_instance(data, schema)
+    if errors:
+        return None, errors
+    _stripped, missing = strip_nulls(data, schema)
+    return {
+        "v": CACHE_FORMAT,
+        "data": data,
+        "missing": missing,
+        "normalized": normalized,
+        "coerced": coerced,
+        "rejected": rejected,
+    }, []
+
+
+def finalize(envelope, schema, text, params):
+    """Apply the quality policies to an envelope, whether fresh or from the cache."""
+    data, missing = strip_nulls(envelope.get("data"), schema)
+    normalized = envelope.get("normalized") or []
+    unverified, checked, grounded = _quality_gate(
+        data, missing, schema, text, normalized, params
+    )
+    dropped = 0
+    if unverified and (params.get("on_ungrounded") or "drop") == "drop":
+        data, missing_now = drop_unverified(data, schema, unverified)
+        missing = sorted(set(missing) | set(missing_now))
+        dropped = len(unverified)
+    return data, {
+        "missing": missing,
+        "unverified": unverified,
+        "checked": checked,
+        "grounded": grounded,
+        "dropped": dropped,
+        "normalized": normalized,
+        "coerced": envelope.get("coerced") or [],
+        "rejected": envelope.get("rejected") or [],
+    }
+
+
+def _cache_hit(cache_dir, key, schema):
+    payload = cache_read(cache_dir, key)
+    if payload is None:
+        return None
+    if validate_instance(payload["data"], schema):
+        return None  # a tampered or stale entry is a miss, not an answer
+    return payload
+
+
 def extract(params):
     """Run the whole pipeline; returns (facts, metadata)."""
     started = time.time()
@@ -1307,6 +1400,7 @@ def extract(params):
     schema = prepared["schema"]
     text = prepared["text"]
     chunks = prepared["chunks"]
+    sent_text = "".join(chunks)
 
     meta = {
         "ok": False,
@@ -1318,6 +1412,7 @@ def extract(params):
         "input_chars": len(text),
         "backend": params["backend"],
         "cache_hit": False,
+        "check_mode": bool(params.get("check_mode")),
         "attempts": 0,
         "chunks": len(chunks),
         "tokens": {"in": 0, "out": 0},
@@ -1335,27 +1430,16 @@ def extract(params):
     cache_dir = plan["cache"]["dir"]
     cache_key = plan["cache"]["key"]
     if params.get("cache"):
-        cached = cache_read(cache_dir, cache_key)
+        cached = _cache_hit(cache_dir, cache_key, schema)
         if cached is not None:
-            data = cached.get("data") or {}
-            missing = cached.get("missing") or []
             try:
-                unverified, checked, grounded = _quality_gate(
-                    data, missing, schema, text, [], params
-                )
+                data, info = finalize(cached, schema, sent_text, params)
             except ContractError as exc:
                 exc.plan = plan
                 raise
-            if unverified and (params.get("on_ungrounded") or "drop") == "drop":
-                data, missing_now = drop_unverified(data, schema, unverified)
-                missing = sorted(set(missing) | set(missing_now))
-            meta.update(
-                ok=True, cache_hit=True, missing=missing, unverified=unverified,
-                checked=checked, grounded=grounded,
-                dropped=len(unverified) if unverified and
-                (params.get("on_ungrounded") or "drop") == "drop" else 0,
-                elapsed_ms=int((time.time() - started) * 1000),
-            )
+            meta.update(info)
+            meta.update(ok=True, cache_hit=True,
+                        elapsed_ms=int((time.time() - started) * 1000))
             return data, meta
 
     backend = make_backend(params)
@@ -1364,10 +1448,10 @@ def extract(params):
 
     results = []
     last_raw = None
+    last_errors = []
     for chunk in chunks:
         best = None
         best_score = -1
-        last_errors = []
         for attempt in range(attempts_allowed):
             # A retry has to change the sampling, otherwise it is byte-identical at
             # temperature 0 with a fixed seed and "best of N" is a lie.
@@ -1393,11 +1477,9 @@ def extract(params):
                 if finish_reason == "length":
                     last_errors.append("output was truncated by max_tokens")
                 continue
-            checked_values = normalize_enums(coerce_leaves(parsed, schema), schema)
-            checked_values = reject_enum_mismatches(checked_values, schema)
-            last_errors = validate_instance(checked_values, schema)
-            score = _count_leaves(checked_values)
-            if not last_errors:
+            envelope, last_errors = build_envelope(parsed, schema)
+            score = _count_leaves(parsed)
+            if envelope is not None:
                 best = parsed
                 break
             if score > best_score:
@@ -1413,34 +1495,30 @@ def extract(params):
         results.append(best)
 
     merged = merge_results(results, params["merge"])
-    coerced = coerce_leaves(merged, schema, out=meta["coerced"])
-    normalized = normalize_enums(coerced, schema, out=meta["normalized"])
-    normalized = reject_enum_mismatches(normalized, schema, out=meta["rejected"])
-    errors = validate_instance(normalized, schema)
-    if errors:
+    envelope, errors = build_envelope(merged, schema)
+    if envelope is None:
         if params["on_invalid"] == "return_raw":
-            meta.update(ok=False, errors=errors, elapsed_ms=int((time.time() - started) * 1000))
+            meta.update(ok=False, raw_output=last_raw, errors=errors,
+                        elapsed_ms=int((time.time() - started) * 1000))
             return {}, meta
         raise ContractError("schema_violation", "; ".join(errors), plan)
 
-    data, missing = strip_nulls(normalized, schema)
-    meta["missing"] = missing
+    if params.get("debug"):
+        meta["projection_schema"] = projection_schema(schema)
+
     try:
-        unverified, checked, grounded = _quality_gate(
-            data, missing, schema, text, meta["normalized"], params
-        )
+        data, info = finalize(envelope, schema, sent_text, params)
     except ContractError as exc:
         exc.plan = plan
         raise
-    meta.update(unverified=unverified, checked=checked, grounded=grounded)
-    if unverified and (params.get("on_ungrounded") or "drop") == "drop":
-        data, missing_now = drop_unverified(data, schema, unverified)
-        meta["missing"] = sorted(set(meta["missing"]) | set(missing_now))
-        meta["dropped"] = len(unverified)
+    meta.update(info, ok=True, elapsed_ms=int((time.time() - started) * 1000))
 
-    meta.update(ok=True, elapsed_ms=int((time.time() - started) * 1000))
     if params.get("debug"):
         meta["raw_output"] = last_raw
-    if params.get("cache"):
-        cache_write(cache_dir, cache_key, {"data": data, "missing": missing})
+    if params.get("cache") and not params.get("check_mode"):
+        written = cache_write(cache_dir, cache_key, envelope)
+        if not written:
+            meta["cache_written"] = False
+    elif params.get("check_mode"):
+        meta["cache_written"] = False
     return data, meta

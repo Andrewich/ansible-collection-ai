@@ -333,7 +333,8 @@ def main():
         supports_check_mode=True,
     )
 
-    params = module.params
+    params = dict(module.params)
+    params["check_mode"] = bool(module.check_mode)
     try:
         data, meta = core.extract(params)
     except core.ContractError as exc:
