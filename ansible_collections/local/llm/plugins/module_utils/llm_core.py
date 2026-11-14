@@ -637,7 +637,7 @@ def normalize_enums(data, schema, path="", out=None):
             if allowed != data:
                 out.append({"path": path or "$", "from": data, "to": allowed})
             return allowed
-    matches = [allowed for allowed in enum if allowed.casefold() in folded]
+    matches = [allowed for allowed in enum if appears_in(allowed, data)]
     if len(matches) == 1:
         out.append({"path": path or "$", "from": data, "to": matches[0]})
         return matches[0]
@@ -1281,7 +1281,14 @@ def _quality_gate(data, missing, schema, text, normalized, params):
             None,
         )
     if params["min_grounded"]:
-        ratio = (grounded / float(checked)) if checked else 1.0
+        if checked == 0:
+            raise ContractError(
+                "grounding_failed",
+                "min_grounded=%s was requested but there is nothing to verify: every value "
+                "was missing, dropped or not checkable" % params["min_grounded"],
+                None,
+            )
+        ratio = grounded / float(checked)
         if ratio < params["min_grounded"]:
             raise ContractError(
                 "grounding_failed",
@@ -1340,7 +1347,8 @@ def extract(params):
                 exc.plan = plan
                 raise
             if unverified and (params.get("on_ungrounded") or "drop") == "drop":
-                data, missing = drop_unverified(data, schema, unverified)
+                data, missing_now = drop_unverified(data, schema, unverified)
+                missing = sorted(set(missing) | set(missing_now))
             meta.update(
                 ok=True, cache_hit=True, missing=missing, unverified=unverified,
                 checked=checked, grounded=grounded,
@@ -1426,7 +1434,8 @@ def extract(params):
         raise
     meta.update(unverified=unverified, checked=checked, grounded=grounded)
     if unverified and (params.get("on_ungrounded") or "drop") == "drop":
-        data, meta["missing"] = drop_unverified(data, schema, unverified)
+        data, missing_now = drop_unverified(data, schema, unverified)
+        meta["missing"] = sorted(set(meta["missing"]) | set(missing_now))
         meta["dropped"] = len(unverified)
 
     meta.update(ok=True, elapsed_ms=int((time.time() - started) * 1000))
