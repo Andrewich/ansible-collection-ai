@@ -19,6 +19,7 @@ from __future__ import absolute_import, division, print_function
 __metaclass__ = type
 
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -27,6 +28,7 @@ import ssl
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 CORE_VERSION = "llm_extract/2.0"
@@ -52,6 +54,7 @@ ERROR_CODES = (
     "input_not_found",
     "input_unreadable",
     "input_encoding",
+    "invalid_server_url",
     "invalid_params",
     "timeout",
 )
@@ -1138,12 +1141,56 @@ class PythonBackend(object):
         return choice["message"]["content"], choice.get("finish_reason"), result.get("usage") or {}
 
 
+def is_loopback_host(host):
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects, so a loopback endpoint cannot forward the document elsewhere."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code, "redirect refused: %s" % newurl, headers, fp
+        )
+
+
 class ServerBackend(object):
-    """OpenAI compatible inference against llama-server or `python -m llama_cpp.server`."""
+    """OpenAI compatible inference against llama-server or `python -m llama_cpp.server`.
+
+    The endpoint must be loopback: the module promises that inference is local, and a
+    remote URL would silently ship the document (and the prompt) over the network.
+    """
 
     def __init__(self, params):
         self.params = params
-        self.url = (params["server_url"] or "").rstrip("/") + "/v1/chat/completions"
+        raw_url = params["server_url"] or ""
+        parsed = urllib.parse.urlsplit(raw_url)
+        if parsed.scheme not in ("http", "https"):
+            raise BackendError(
+                "invalid_server_url",
+                "server_url must use http or https, got %r" % raw_url,
+            )
+        if parsed.username or parsed.password:
+            raise BackendError(
+                "invalid_server_url", "server_url must not contain credentials"
+            )
+        if not is_loopback_host(parsed.hostname):
+            raise BackendError(
+                "invalid_server_url",
+                "server_url must point to a loopback address (127.0.0.0/8, ::1 or "
+                "localhost); %r would send the document off the host" % raw_url,
+            )
+        self.url = raw_url.rstrip("/") + "/v1/chat/completions"
+        self._opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), NoRedirectHandler()
+        )
 
     def complete(self, messages, gbnf, max_tokens, temperature, seed, timeout):
         payload = {
@@ -1164,7 +1211,7 @@ class ServerBackend(object):
         )
         context = ssl.create_default_context() if self.url.startswith("https") else None
         try:
-            with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+            with self._opener.open(request, timeout=timeout) as response:
                 body = json.loads(response.read().decode("utf-8"))
         except socket.timeout:
             raise BackendError("timeout", "inference exceeded the %ss timeout" % timeout)
