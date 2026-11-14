@@ -274,6 +274,12 @@ def fields_to_schema(fields):
         if field.get("description"):
             spec["description"] = str(field["description"])
         if field.get("enum"):
+            if ftype != "string":
+                raise ContractError(
+                    "schema_invalid",
+                    "field %r: enum is only supported for string fields; for a list put the "
+                    "constraint on the items, for numbers use minimum/maximum" % name,
+                )
             spec["enum"] = list(field["enum"]) + [None]
         properties[name] = spec
         required.append(name)
@@ -302,6 +308,15 @@ def _kind_of(schema):
     return kinds[0]
 
 
+def enum_entries(schema):
+    """Return (values, only_null). None in an enum list means 'may be null'."""
+    raw = schema.get("enum")
+    if raw is None:
+        return None, False
+    values = [value for value in raw if value is not None]
+    return values, (not values and None in raw)
+
+
 def _as_nullable(schema):
     """Return a copy of the schema that also accepts null (for optional properties)."""
     if _is_nullable(schema):
@@ -311,7 +326,7 @@ def _as_nullable(schema):
     return copy
 
 
-def validate_schema(schema, path="root"):
+def validate_schema(schema, path="root", root=True):
     """Enforce the grammar-friendly subset and return a summary for the plan."""
     if not isinstance(schema, dict):
         raise ContractError("schema_invalid", "%s: schema must be an object" % path)
@@ -334,6 +349,11 @@ def validate_schema(schema, path="root"):
             "%s: unsupported type %s" % (path, ", ".join(sorted(unknown_types))),
         )
     kind = _kind_of(schema)
+    if root and kind != "object":
+        raise ContractError(
+            "schema_unsupported",
+            "%s: the root of the schema must be an object, got %s" % (path, kind),
+        )
 
     if kind == "object":
         properties = schema.get("properties")
@@ -353,28 +373,58 @@ def validate_schema(schema, path="root"):
             )
         children = {}
         for name, subschema in properties.items():
-            children[name] = validate_schema(subschema, "%s.%s" % (path, name))
+            children[name] = validate_schema(subschema, "%s.%s" % (path, name), root=False)
         return {"kind": "object", "properties": sorted(properties),
                 "required": list(required), "children": children}
 
     if kind in SCALAR_TYPES:
-        if schema.get("enum"):
-            values = schema["enum"]
-            if not isinstance(values, list) or not all(
-                isinstance(value, str) for value in values if value is not None
+        if schema.get("enum") is not None:
+            raw = schema["enum"]
+            if not isinstance(raw, list) or not all(
+                isinstance(value, str) for value in raw if value is not None
             ):
-                raise ContractError("schema_invalid", "%s: enum must be a list of strings" % path)
-        if schema.get("maxLength") and int(schema["maxLength"]) > MAX_STRING_CHARS:
-            raise ContractError(
-                "schema_unsupported",
-                "%s: maxLength above %d is not supported by the grammar defaults"
-                % (path, MAX_STRING_CHARS),
-            )
+                raise ContractError(
+                    "schema_invalid", "%s: enum must be a list of strings" % path
+                )
+            if kind != "string":
+                raise ContractError(
+                    "schema_unsupported",
+                    "%s: enum is only supported for string fields, not %s" % (path, kind),
+                )
+        if schema.get("maxLength") is not None:
+            limit = schema["maxLength"]
+            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+                raise ContractError(
+                    "schema_invalid", "%s: maxLength must be a non-negative integer" % path
+                )
+            if limit > MAX_STRING_CHARS:
+                raise ContractError(
+                    "schema_unsupported",
+                    "%s: maxLength above %d is not supported by the grammar"
+                    % (path, MAX_STRING_CHARS),
+                )
         return {"kind": kind, "nullable": _is_nullable(schema)}
 
     if kind == "array":
+        if schema.get("enum") is not None:
+            raise ContractError(
+                "schema_unsupported",
+                "%s: enum is not supported on arrays, put it on items instead" % path,
+            )
+        if schema.get("maxItems") is not None:
+            limit = schema["maxItems"]
+            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+                raise ContractError(
+                    "schema_invalid", "%s: maxItems must be a non-negative integer" % path
+                )
+            if limit > MAX_ARRAY_ITEMS:
+                raise ContractError(
+                    "schema_unsupported",
+                    "%s: maxItems above %d is not supported by the grammar"
+                    % (path, MAX_ARRAY_ITEMS),
+                )
         items = schema.get("items") or {}
-        item_summary = validate_schema(items, "%s[]" % path)
+        item_summary = validate_schema(items, "%s[]" % path, root=False)
         if item_summary["kind"] not in SCALAR_TYPES:
             raise ContractError(
                 "schema_unsupported",
@@ -478,17 +528,31 @@ def build_gbnf(schema, strict_enum=False):
         if kind == "array":
             name = next_name("a")
             child = value_rule(node.get("items") or {"type": "string"}, path + "[]")
-            rules.append(
-                '%s ::= "[" ws (%s (ws "," ws %s){0,%d})? ws "]"'
-                % (name, child, child, MAX_ARRAY_ITEMS - 1)
-            )
+            limit = node.get("maxItems")
+            max_items = MAX_ARRAY_ITEMS if limit is None else min(limit, MAX_ARRAY_ITEMS)
+            if max_items == 0:
+                rules.append('%s ::= "[" ws "]"' % name)
+            else:
+                rules.append(
+                    '%s ::= "[" ws (%s (ws "," ws %s){0,%d})? ws "]"'
+                    % (name, child, child, max_items - 1)
+                )
             return wrap_null(name) if nullable else name
-        if node.get("enum") and strict_enum:
+        enum_values, only_null = enum_entries(node)
+        if only_null:
+            return "null"
+        if enum_values and strict_enum:
             name = next_name("e")
-            alternatives = " | ".join(
-                _quoted_literal(value) for value in node["enum"] if value is not None
-            )
+            alternatives = " | ".join(_quoted_literal(value) for value in enum_values)
             rules.append("%s ::= %s" % (name, alternatives))
+            return wrap_null(name) if nullable else name
+        if kind == "string" and node.get("maxLength") is not None:
+            limit = node["maxLength"]
+            name = next_name("s")
+            if limit == 0:
+                rules.append('%s ::= "\\"\\""' % name)
+            else:
+                rules.append('%s ::= "\\"" char{0,%d} "\\""' % (name, limit))
             return wrap_null(name) if nullable else name
         return wrap_null(kind) if nullable else kind
 
@@ -564,7 +628,7 @@ def normalize_enums(data, schema, path="", out=None):
         items = schema.get("items") or {}
         return [normalize_enums(value, items, "%s[]" % path, out) for value in data]
 
-    enum = [value for value in (schema.get("enum") or []) if value is not None]
+    enum, only_null = enum_entries(schema)
     if not enum or not isinstance(data, str):
         return data
     folded = data.casefold().strip()
@@ -601,7 +665,7 @@ def reject_enum_mismatches(data, schema, path="", out=None):
     if isinstance(data, list):
         items = schema.get("items") or {}
         return [reject_enum_mismatches(value, items, "%s[]" % path, out) for value in data]
-    enum = [value for value in (schema.get("enum") or []) if value is not None]
+    enum, only_null = enum_entries(schema)
     if enum and isinstance(data, str) and data not in enum:
         out.append({"path": path or "$", "value": data, "reason": "not in enum"})
         return None
@@ -645,7 +709,7 @@ def validate_instance(instance, schema, path="$", errors=None):
         if not isinstance(instance, list):
             errors.append("%s: expected array, got %s" % (path, type(instance).__name__))
             return errors
-        if schema.get("maxItems") and len(instance) > int(schema["maxItems"]):
+        if schema.get("maxItems") is not None and len(instance) > int(schema["maxItems"]):
             errors.append("%s: more than %s items" % (path, schema["maxItems"]))
         for index, value in enumerate(instance):
             validate_instance(value, schema.get("items") or {}, "%s[%d]" % (path, index), errors)
@@ -659,10 +723,12 @@ def validate_instance(instance, schema, path="$", errors=None):
         errors.append("%s: expected %s, got %s" % (path, kind, type(instance).__name__))
         return errors
     if kind == "string":
-        if schema.get("maxLength") and len(instance) > int(schema["maxLength"]):
+        if schema.get("maxLength") is not None and len(instance) > int(schema["maxLength"]):
             errors.append("%s: longer than %s" % (path, schema["maxLength"]))
-        enum = [value for value in (schema.get("enum") or []) if value is not None]
-        if enum and instance not in enum:
+        enum, only_null = enum_entries(schema)
+        if only_null:
+            errors.append("%s: the schema allows only null, got %r" % (path, instance))
+        elif enum and instance not in enum:
             errors.append("%s: %r is not one of %s" % (path, instance, enum))
     if kind in ("integer", "number"):
         if schema.get("minimum") is not None and instance < schema["minimum"]:
@@ -693,7 +759,7 @@ def strip_nulls(data, schema, path="", missing=None):
             items = (node or {}).get("items") or {}
             cleaned = [walk(item, items, "%s[]" % current) for item in value]
             cleaned = [item for item in cleaned if item is not None]
-            return cleaned or None
+            return cleaned
         return value
 
     return walk(data, schema, path), missing
@@ -758,6 +824,27 @@ def drop_unverified(data, schema, unverified):
     doomed = set(item["path"] for item in unverified)
     cleaned, extra_missing = strip_nulls(drop_paths(data, schema, doomed), schema)
     return cleaned, sorted(set(extra_missing) | doomed)
+
+
+def projection_schema(schema):
+    """The schema of the returned facts: nulls are stripped, so nothing stays required."""
+    kind = _kind_of(schema)
+    result = {"type": _types_of(schema)}
+    if kind == "object":
+        result["properties"] = dict(
+            (name, projection_schema(subschema))
+            for name, subschema in (schema.get("properties") or {}).items()
+        )
+        result["additionalProperties"] = False
+    elif kind == "array":
+        result["items"] = projection_schema(schema.get("items") or {"type": "string"})
+    else:
+        if schema.get("enum") is not None:
+            result["enum"] = schema["enum"]
+        for key in ("maxLength", "minimum", "maximum"):
+            if schema.get(key) is not None:
+                result[key] = schema[key]
+    return result
 
 
 def original_values(normalized):
