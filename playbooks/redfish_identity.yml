@@ -12,6 +12,9 @@
 # lines. The mainboard vendor (MiTAC / D3383) and the CPU vendor lines are dropped there,
 # so the model does not have to guess which "Manufacturer" is the server one.
 #
+# The reducer is a filter shipped with this collection (plugins/filter/redfish_identity.py),
+# so no awk/gawk/jq is involved: only Ansible and Python on the controller.
+#
 - name: Server identity from real Redfish payloads
   hosts: localhost
   connection: local
@@ -35,38 +38,44 @@
         description: "Distinct CPU model strings, exactly as written"
 
   tasks:
-    - name: Reduce each payload to identity lines (path = value)
-      ansible.builtin.shell: |
-        set -o pipefail
-        awk -f "{{ playbook_dir }}/../scripts/redfish_paths.awk" "{{ item }}" \
-          | awk '!seen[$0]++'
-      args:
-        executable: /bin/bash
+    - name: Read the payloads as raw text
+      ansible.builtin.slurp:
+        src: "{{ item }}"
       loop: "{{ payloads }}"
       loop_control:
         label: "{{ item | basename }}"
-      register: identity_text
-      changed_when: false
+      register: raw_payloads
 
-    - name: What the model will read
-      ansible.builtin.debug:
-        msg: "{{ item.stdout_lines }}"
-      loop: "{{ identity_text.results }}"
+    - name: Reduce each payload to identity lines (built-in filter, no external tools)
+      ansible.builtin.set_fact:
+        identity_lines: >-
+          {{ identity_lines | default([]) + [{
+               'file': item.item | basename,
+               'text': item.content | b64decode | local.llm.redfish_identity
+             }] }}
+      loop: "{{ raw_payloads.results }}"
       loop_control:
         label: "{{ item.item | basename }}"
 
+    - name: What the model will read
+      ansible.builtin.debug:
+        msg: "{{ item.text.splitlines() }}"
+      loop: "{{ identity_lines }}"
+      loop_control:
+        label: "{{ item.file }}"
+
     - name: Extract vendor, model and processors
       local.llm.llm_extract:
-        text: "{{ item.stdout }}"
+        text: "{{ item.text }}"
         prompt_file: "{{ playbook_dir }}/../prompts/redfish_identity.txt"
         fields: "{{ identity_fields }}"
         model_path: "{{ llm_model }}"
         backend: python
         n_threads: 2
         cache: false
-      loop: "{{ identity_text.results }}"
+      loop: "{{ identity_lines }}"
       loop_control:
-        label: "{{ item.item | basename }}"
+        label: "{{ item.file }}"
       register: identity
 
     # A 350M model sometimes repeats the same socket entry several times. Identical
@@ -76,11 +85,11 @@
       ansible.builtin.set_fact:
         identity_report: >-
           {{ identity_report | default([]) + [{
-               'file': item.item.item | basename,
+               'file': item.item.file,
                'vendor': item.ansible_facts.llm_result.vendor | default(none),
                'model': item.ansible_facts.llm_result.model | default(none),
                'processors': (item.ansible_facts.llm_result.processors | default([])) | unique,
-               'chars': item.item.stdout | length,
+               'chars': item.item.text | length,
                'tokens': item.llm.tokens.in ~ '/' ~ item.llm.tokens.out,
                'elapsed_ms': item.llm.elapsed_ms,
                'missing': item.llm.missing,
@@ -88,7 +97,7 @@
              }] }}
       loop: "{{ identity.results }}"
       loop_control:
-        label: "{{ item.item.item | basename }}"
+        label: "{{ item.item.file }}"
 
     - name: Result
       ansible.builtin.debug:

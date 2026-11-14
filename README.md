@@ -120,12 +120,14 @@ ansible_collections/local/llm/          коллекция (galaxy.yml, meta/run
   plugins/module_utils/llm_core.py      ядро: грамматика, проверки, кэш, бэкенды
   plugins/modules/llm_extract.py        модуль (тонкая обёртка)
   plugins/lookup/llm_extract.py         lookup поверх того же ядра
+  plugins/filter/redfish_identity.py    компакция Redfish в "путь = значение" (без awk/jq)
 docs/contract.md                        контракт: параметры, ошибки, политики, замеры
 prompts/*.txt                           инструкции для модели (версионируются)
 schemas/*.json                          JSON Schema для вложенных структур
 vars/redfish_fields.yml                 схема фактов Redfish (домен, не модуль)
 fixtures/                               «грязные» payload-ы Dell / HPE / Inspur
 playbooks/introspect_llm_extract.yml    сквозная проверка: 8 задач, реальная модель + mock
+playbooks/redfish_identity.yml          пример: vendor/model/CPU из реальных Huawei и Fujitsu
 tests/test_*.py                         159 тестов: контракт, конвейер, регрессии
 scripts/                                модель, сервер, запуск плейбука, requirements
 ```

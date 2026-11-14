@@ -14,6 +14,7 @@ ansible_collections/local/llm/
   plugins/module_utils/llm_core.py    # всё ядро: грамматика, проверки, кэш, бэкенды
   plugins/modules/llm_extract.py      # тонкая обёртка: DOCUMENTATION + AnsibleModule
   plugins/lookup/llm_extract.py       # то же ядро для шаблонов
+  plugins/filter/redfish_identity.py  # компакция Redfish в "путь = значение" (пример, без внешних утилит)
 ```
 
 ```yaml
