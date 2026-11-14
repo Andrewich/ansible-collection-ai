@@ -1,0 +1,106 @@
+---
+# Server identity from two real Redfish payloads (Huawei iBMC and Fujitsu iRMC).
+#
+#   ./scripts/run-playbook.sh playbooks/redfish_identity.yml
+#
+# Only three facts are requested: vendor, model, processors. Memory, serial numbers,
+# firmware versions and everything else are not extracted.
+#
+# Why a compaction step: the raw payloads are 11-13 KB (far over the 1200 character budget
+# of a 350M model) and the Huawei one is not even valid JSON (an object and an array are
+# mixed under "Processors"), so it is reduced line by line to "path = value" identity
+# lines. The mainboard vendor (MiTAC / D3383) and the CPU vendor lines are dropped there,
+# so the model does not have to guess which "Manufacturer" is the server one.
+#
+- name: Server identity from real Redfish payloads
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    payloads:
+      - "{{ playbook_dir }}/../fixtures/real_huawei.json"
+      - "{{ playbook_dir }}/../fixtures/real_fujitsu.json"
+
+    # Only the requested facts. No memory, no serial, no firmware.
+    identity_fields:
+      - name: vendor
+        type: string
+        description: "Manufacturer of the whole server system"
+      - name: model
+        type: string
+        description: "Product model of the whole server system"
+      - name: processors
+        type: list
+        description: "Distinct CPU model strings, exactly as written"
+
+  tasks:
+    - name: Reduce each payload to identity lines (path = value)
+      ansible.builtin.shell: |
+        set -o pipefail
+        awk -f "{{ playbook_dir }}/../scripts/redfish_paths.awk" "{{ item }}" \
+          | awk '!seen[$0]++'
+      args:
+        executable: /bin/bash
+      loop: "{{ payloads }}"
+      loop_control:
+        label: "{{ item | basename }}"
+      register: identity_text
+      changed_when: false
+
+    - name: What the model will read
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ identity_text.results }}"
+      loop_control:
+        label: "{{ item.item | basename }}"
+
+    - name: Extract vendor, model and processors
+      local.llm.llm_extract:
+        text: "{{ item.stdout }}"
+        prompt_file: "{{ playbook_dir }}/../prompts/redfish_identity.txt"
+        fields: "{{ identity_fields }}"
+        model_path: "{{ llm_model }}"
+        backend: python
+        n_threads: 2
+        cache: false
+      loop: "{{ identity_text.results }}"
+      loop_control:
+        label: "{{ item.item | basename }}"
+      register: identity
+
+    # A 350M model sometimes repeats the same socket entry several times. Identical
+    # strings are collapsed here, which is the only deterministic post-step in the
+    # playbook; everything else comes straight from the module.
+    - name: Collapse repeated processor entries
+      ansible.builtin.set_fact:
+        identity_report: >-
+          {{ identity_report | default([]) + [{
+               'file': item.item.item | basename,
+               'vendor': item.ansible_facts.llm_result.vendor | default(none),
+               'model': item.ansible_facts.llm_result.model | default(none),
+               'processors': (item.ansible_facts.llm_result.processors | default([])) | unique,
+               'chars': item.item.stdout | length,
+               'tokens': item.llm.tokens.in ~ '/' ~ item.llm.tokens.out,
+               'elapsed_ms': item.llm.elapsed_ms,
+               'missing': item.llm.missing,
+               'dropped': item.llm.dropped
+             }] }}
+      loop: "{{ identity.results }}"
+      loop_control:
+        label: "{{ item.item.item | basename }}"
+
+    - name: Result
+      ansible.builtin.debug:
+        msg:
+          - "{{ item.file }}"
+          - "  vendor: {{ item.vendor | default('MISSING') }}"
+          - "  model:  {{ item.model | default('MISSING') }}"
+          - "  cpus:   {{ item.processors | join(' | ') }}"
+          - >-
+            input {{ item.chars }} chars, tokens {{ item.tokens }},
+            {{ item.elapsed_ms }} ms
+          - "  missing={{ item.missing }}, dropped={{ item.dropped }}"
+      loop: "{{ identity_report }}"
+      loop_control:
+        label: "{{ item.file }}"
