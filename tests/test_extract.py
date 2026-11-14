@@ -48,7 +48,7 @@ def params(**overrides):
         result_key="llm_result",
         model_path=None,
         model_id="mock-model",
-        backend="mock",
+        backend="mock", allow_mock=True,
         server_url="http://127.0.0.1:8080",
         max_input_chars=1200,
         on_too_long="fail",

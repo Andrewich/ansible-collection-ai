@@ -24,7 +24,7 @@ def params(**overrides):
     base = dict(
         text="SerialNumber = 7XK2P13", src=None, prompt="Extract.", prompt_file=None,
         fields=[{"name": "serial", "type": "string"}], json_schema=None,
-        result_key="llm_result", model_path=None, model_id="m", backend="mock",
+        result_key="llm_result", model_path=None, model_id="m", backend="mock", allow_mock=True,
         server_url="http://127.0.0.1:8080", max_input_chars=1200, on_too_long="fail",
         merge="first", on_missing="allow", on_invalid="retry", grounding="substring",
         on_ungrounded="keep", min_grounded=0.0, strict_enum=False, cache=False,
@@ -132,6 +132,7 @@ class ModuleResultTest(unittest.TestCase):
             "prompt": "Extract.",
             "fields": [{"name": "serial", "type": "string"}],
             "backend": "mock",
+            "allow_mock": True,
             "mock_response": "{broken",
             "on_invalid": "return_raw",
         })
@@ -145,6 +146,7 @@ class ModuleResultTest(unittest.TestCase):
             "prompt": "Extract.",
             "fields": [{"name": "serial", "type": "string"}],
             "backend": "mock",
+            "allow_mock": True,
             "mock_response": '{"serial": "7XK2P13"}',
         })
         self.assertEqual(result["ansible_facts"]["llm_result"], {"serial": "7XK2P13"})

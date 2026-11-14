@@ -24,7 +24,7 @@ def params(**overrides):
     base = dict(
         text=TEXT, src=None, prompt="Extract.", prompt_file=None, fields=FIELDS,
         json_schema=None, result_key="llm_result", model_path=None, model_id="m",
-        backend="mock", server_url="http://127.0.0.1:8080", max_input_chars=1200,
+        backend="mock", allow_mock=True, server_url="http://127.0.0.1:8080", max_input_chars=1200,
         on_too_long="fail", merge="first", on_missing="allow", on_invalid="retry",
         grounding="substring", on_ungrounded="keep", min_grounded=0.0,
         strict_enum=False, cache=False, cache_dir=None, temperature=0.0, seed=0,
@@ -118,7 +118,7 @@ class LookupValidationTest(unittest.TestCase):
 
         with self.assertRaises(AnsibleError) as ctx:
             self.lookup.run([TEXT], prompt="Extract.", fields=FIELDS,
-                            backend="mock", cache="false")
+                            backend="mock", allow_mock=True, cache="false")
         self.assertIn("cache must be a boolean", str(ctx.exception))
 
     def test_unknown_keyword_is_rejected(self):
@@ -126,7 +126,7 @@ class LookupValidationTest(unittest.TestCase):
 
         with self.assertRaises(AnsibleError) as ctx:
             self.lookup.run([TEXT], prompt="Extract.", fields=FIELDS,
-                            backend="mock", mutst_response="{}")
+                            backend="mock", allow_mock=True, mutst_response="{}")
         self.assertIn("unknown parameter(s): mutst_response", str(ctx.exception))
 
     def test_term_with_src_is_rejected(self):
@@ -141,7 +141,7 @@ class LookupValidationTest(unittest.TestCase):
         from ansible.errors import AnsibleError
 
         with self.assertRaises(AnsibleError) as ctx:
-            self.lookup.run([TEXT], prompt="Extract.", fields=FIELDS, backend="mock",
+            self.lookup.run([TEXT], prompt="Extract.", fields=FIELDS, backend="mock", allow_mock=True,
                             on_invalid="return_raw")
         self.assertIn("return_raw", str(ctx.exception))
 

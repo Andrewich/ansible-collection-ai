@@ -27,7 +27,7 @@ def params(**overrides):
     base = dict(
         text=TEXT, src=None, prompt="Extract the fields.", prompt_file=None,
         fields=None, json_schema=None, result_key="llm_result",
-        model_path=None, model_id="mock-model", backend="mock",
+        model_path=None, model_id="mock-model", backend="mock", allow_mock=True,
         server_url="http://127.0.0.1:8080", max_input_chars=1200,
         on_too_long="fail", merge="first", on_missing="allow", on_invalid="retry",
         grounding="substring", on_ungrounded="keep", min_grounded=0.0, strict_enum=False,

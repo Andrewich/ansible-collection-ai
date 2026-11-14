@@ -38,7 +38,7 @@ def params(**overrides):
         result_key="llm_result",
         model_path=None,
         model_id=None,
-        backend="mock",
+        backend="mock", allow_mock=True,
         server_url="http://127.0.0.1:8080",
         max_input_chars=1200,
         on_too_long="fail",
@@ -204,7 +204,7 @@ class PreflightTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "model_not_found")
 
     def test_mock_backend_needs_no_model(self):
-        plan, _schema = L.preflight(params(backend="mock", model_path=None))
+        plan, _schema = L.preflight(params(backend="mock", allow_mock=True, model_path=None))
         self.assertFalse(plan["model"]["exists"])
 
     def test_json_schema_as_string_is_accepted(self):

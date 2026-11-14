@@ -55,6 +55,7 @@ ERROR_CODES = (
     "input_unreadable",
     "input_encoding",
     "invalid_server_url",
+    "mock_not_allowed",
     "invalid_params",
     "timeout",
 )
@@ -98,7 +99,7 @@ INT_PARAMS = {
     "n_threads": 0,
 }
 
-BOOL_PARAMS = ("strict_enum", "cache", "debug")
+BOOL_PARAMS = ("strict_enum", "cache", "debug", "allow_mock")
 
 KNOWN_PARAMS = frozenset(
     [
@@ -107,7 +108,7 @@ KNOWN_PARAMS = frozenset(
         "on_too_long", "merge", "on_missing", "on_invalid", "grounding", "on_ungrounded",
         "min_grounded", "strict_enum", "cache", "cache_dir", "temperature", "seed",
         "max_tokens", "retries", "n_ctx", "n_threads", "timeout", "mock_response", "debug",
-        "check_mode",
+        "check_mode", "allow_mock",
     ]
 )
 
@@ -1241,6 +1242,12 @@ class MockBackend(object):
 def make_backend(params):
     backend = params["backend"]
     if backend == "mock":
+        if not params.get("allow_mock"):
+            raise BackendError(
+                "mock_not_allowed",
+                "backend 'mock' returns a canned answer, not extracted facts; set "
+                "allow_mock=true explicitly for tests and demos",
+            )
         return MockBackend(params)
     if backend == "python":
         return PythonBackend(params)

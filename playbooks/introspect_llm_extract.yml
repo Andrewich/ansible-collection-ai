@@ -117,6 +117,7 @@
         prompt_file: "{{ playbook_dir }}/../prompts/nginx_error_classify.txt"
         json_schema: "{{ nginx_schema }}"
         backend: mock
+        allow_mock: true
         # "upstream_timeout" is a label, not copied text, so it is expected to be reported
         # as ungrounded; keep it instead of dropping it for this classification task.
         on_ungrounded: keep
@@ -148,6 +149,7 @@
             type: string
             enum: [urgent, high, normal]
         backend: mock
+        allow_mock: true
         mock_response: '{"category": "hardware", "priority": "urgent"}'
         grounding: none
       register: ticket
@@ -166,6 +168,7 @@
         prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
         fields: "{{ redfish_fields }}"
         backend: mock
+        allow_mock: true
         mock_response: '{"serial": 42, "vendor": "Acme"}'
         on_invalid: fail
       register: broken
@@ -216,7 +219,7 @@
                     'SerialNumber = 7XK2P13',
                     prompt='Extract the serial number.',
                     fields=[{'name': 'serial', 'type': 'string'}],
-                    backend='mock',
+                    backend='mock', allow_mock=true,
                     mock_response='{"serial": "7XK2P13"}') }}
 
     - name: The lookup returns the object itself

@@ -208,6 +208,14 @@ options:
   mock_response:
     description: Canned answer for I(backend=mock), a JSON string.
     type: str
+  allow_mock:
+    description:
+      - Must be set to C(true) for I(backend=mock).
+      - The mock backend returns I(mock_response) verbatim instead of inference, so it is
+        refused by default, because a playbook that accidentally ships with C(mock) must
+        fail loudly rather than return invented facts.
+    type: bool
+    default: false
   debug:
     description: Include the raw model output in C(llm.raw_output).
     type: bool
@@ -325,6 +333,7 @@ def main():
             n_threads=dict(type="int", default=0),
             timeout=dict(type="int", default=120),
             mock_response=dict(type="str"),
+            allow_mock=dict(type="bool", default=False),
             debug=dict(type="bool", default=False),
         ),
         mutually_exclusive=[["text", "src"], ["prompt", "prompt_file"], ["fields", "json_schema"]],

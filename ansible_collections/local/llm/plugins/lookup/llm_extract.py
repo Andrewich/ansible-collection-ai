@@ -132,6 +132,10 @@ options:
   mock_response:
     description: Canned answer for C(backend=mock).
     type: str
+  allow_mock:
+    description: Must be true to use C(backend=mock); refused by default.
+    type: bool
+    default: false
   debug:
     description: Include the raw output in C(llm).
     type: bool
@@ -187,6 +191,7 @@ DEFAULTS = {
     "strict_enum": False, "cache": True, "cache_dir": None, "temperature": 0.0,
     "seed": 0, "max_tokens": 320, "retries": 1, "n_ctx": 4096, "n_threads": 0,
     "timeout": 120, "mock_response": None, "debug": False, "check_mode": False,
+    "allow_mock": False,
 }
 
 
