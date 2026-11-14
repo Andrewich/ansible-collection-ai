@@ -48,6 +48,7 @@ ERROR_CODES = (
     "missing_fields",
     "grounding_failed",
     "ungrounded_values",
+    "invalid_params",
     "timeout",
 )
 
@@ -70,6 +71,97 @@ ALLOWED_KEYWORDS = frozenset(
 )
 
 _WORD = "0-9A-Za-z\u0410-\u044f\u0401\u0451_"
+
+CHOICES = {
+    "backend": ("python", "server", "mock"),
+    "on_too_long": ("fail", "truncate", "split"),
+    "merge": ("first", "concat", "deep_merge"),
+    "on_missing": ("allow", "fail"),
+    "on_invalid": ("retry", "fail", "return_raw"),
+    "grounding": ("substring", "none"),
+    "on_ungrounded": ("drop", "keep", "fail"),
+}
+
+INT_PARAMS = {
+    "max_input_chars": 1,
+    "max_tokens": 1,
+    "n_ctx": 1,
+    "timeout": 1,
+    "retries": 0,
+    "n_threads": 0,
+}
+
+BOOL_PARAMS = ("strict_enum", "cache", "debug")
+
+KNOWN_PARAMS = frozenset(
+    [
+        "text", "src", "prompt", "prompt_file", "fields", "json_schema", "result_key",
+        "model_path", "model_id", "backend", "server_url", "max_input_chars",
+        "on_too_long", "merge", "on_missing", "on_invalid", "grounding", "on_ungrounded",
+        "min_grounded", "strict_enum", "cache", "cache_dir", "temperature", "seed",
+        "max_tokens", "retries", "n_ctx", "n_threads", "timeout", "mock_response", "debug",
+    ]
+)
+
+
+def validate_params(params, strict_unknown=False):
+    """One validator for both entry points: the module's argument spec and the lookup."""
+    errors = []
+    if strict_unknown:
+        unknown = sorted(set(params) - KNOWN_PARAMS)
+        if unknown:
+            errors.append("unknown parameter(s): %s" % ", ".join(unknown))
+
+    for name, allowed in CHOICES.items():
+        value = params.get(name)
+        if value is not None and value not in allowed:
+            errors.append(
+                "%s must be one of %s, got %r" % (name, ", ".join(allowed), value)
+            )
+
+    for name, minimum in INT_PARAMS.items():
+        value = params.get(name)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int):
+            errors.append("%s must be an integer, got %s" % (name, type(value).__name__))
+        elif value < minimum:
+            errors.append("%s must be >= %d, got %d" % (name, minimum, value))
+
+    for name in BOOL_PARAMS:
+        value = params.get(name)
+        if value is not None and not isinstance(value, bool):
+            errors.append("%s must be a boolean, got %s" % (name, type(value).__name__))
+
+    for name in ("temperature", "min_grounded"):
+        value = params.get(name)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            errors.append("%s must be a number, got %s" % (name, type(value).__name__))
+        elif name == "temperature" and value < 0:
+            errors.append("temperature must be >= 0, got %r" % value)
+        elif name == "min_grounded" and not 0.0 <= value <= 1.0:
+            errors.append("min_grounded must be within 0..1, got %r" % value)
+
+    for left, right in (("text", "src"), ("prompt", "prompt_file"), ("fields", "json_schema")):
+        if params.get(left) is not None and params.get(right) is not None:
+            errors.append("%s and %s are mutually exclusive" % (left, right))
+    for group in (("text", "src"), ("prompt", "prompt_file"), ("fields", "json_schema")):
+        if all(params.get(name) is None for name in group):
+            errors.append("one of %s is required" % ", ".join(group))
+
+    if params.get("fields") is not None and not isinstance(params["fields"], list):
+        errors.append("fields must be a list")
+    if params.get("json_schema") is not None and not isinstance(params["json_schema"], (dict, str)):
+        errors.append("json_schema must be a dict or a JSON string")
+    if params.get("seed") is not None and (
+        isinstance(params["seed"], bool) or not isinstance(params["seed"], int)
+    ):
+        errors.append("seed must be an integer")
+
+    if errors:
+        raise ContractError("invalid_params", "; ".join(errors))
 
 
 class ContractError(Exception):
@@ -697,6 +789,8 @@ def drop_paths(data, schema, doomed, path=""):
 
 
 def split_text(text, max_chars, on_too_long):
+    if max_chars < 1:
+        raise ContractError("invalid_params", "max_input_chars must be >= 1, got %r" % max_chars)
     if len(text) <= max_chars:
         return [text]
     if on_too_long == "truncate":
@@ -946,6 +1040,7 @@ def make_backend(params):
 
 def prepare(params):
     """Validate everything that can be validated without a model; return the plan."""
+    validate_params(params)
     plan = {"module": CORE_VERSION, "backend": params["backend"]}
 
     text, text_source, text_path, structured = load_text(params)

@@ -288,7 +288,17 @@ def main():
             src=dict(type="path"),
             prompt=dict(type="str"),
             prompt_file=dict(type="path"),
-            fields=dict(type="list", elements="dict"),
+            fields=dict(
+                type="list",
+                elements="dict",
+                options=dict(
+                    name=dict(type="str", required=True),
+                    type=dict(type="str", default="string",
+                              choices=["string", "integer", "number", "boolean", "list"]),
+                    description=dict(type="str"),
+                    enum=dict(type="list", elements="str"),
+                ),
+            ),
             json_schema=dict(type="dict"),
             result_key=dict(type="str", default="llm_result"),
             model_path=dict(type="path"),

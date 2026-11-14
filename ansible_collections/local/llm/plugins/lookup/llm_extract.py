@@ -203,6 +203,17 @@ class LookupModule(LookupBase):
             raise AnsibleError("local.llm.llm_extract: pass the text as a term, or use text=/src=")
 
         try:
+            core.validate_params(params, strict_unknown=True)
+        except core.ContractError as exc:
+            raise AnsibleError("local.llm.llm_extract: %s" % exc.message)
+
+        if params.get("on_invalid") == "return_raw":
+            raise AnsibleError(
+                "local.llm.llm_extract: on_invalid=return_raw is not supported by the lookup; "
+                "use the module when you need the raw model output"
+            )
+
+        try:
             data, meta = core.extract(params)
         except core.ContractError as exc:
             raise AnsibleError(
