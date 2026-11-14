@@ -344,15 +344,15 @@ def main():
         )
         return
     except core.BackendError as exc:
-        module.fail_json(msg=exc.message, error_code=exc.code, contract=core.CORE_VERSION)
+        module.fail_json(
+            msg=exc.message, error_code=exc.code, contract=core.CORE_VERSION,
+            plan=exc.plan or None,
+        )
         return
 
     if not meta.get("ok"):
-        module.exit_json(
-            changed=False,
-            ansible_facts={module.params["result_key"]: None},
-            llm=meta,
-        )
+        # No facts at all: a failed extraction must not overwrite an existing value.
+        module.exit_json(changed=False, llm=meta)
         return
 
     module.exit_json(

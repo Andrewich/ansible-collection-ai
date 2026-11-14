@@ -49,6 +49,9 @@ ERROR_CODES = (
     "missing_fields",
     "grounding_failed",
     "ungrounded_values",
+    "input_not_found",
+    "input_unreadable",
+    "input_encoding",
     "invalid_params",
     "timeout",
 )
@@ -177,10 +180,11 @@ class ContractError(Exception):
 
 
 class BackendError(Exception):
-    def __init__(self, code, message):
+    def __init__(self, code, message, plan=None):
         Exception.__init__(self, message)
         self.code = code
         self.message = message
+        self.plan = plan or {}
 
 
 # ---------------------------------------------------------------------------
@@ -192,16 +196,31 @@ def sha256_text(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def sha256_bytes(value):
+    return hashlib.sha256(value).hexdigest()
+
+
 def _collapse(value):
     return re.sub(r"\s+", " ", str(value)).strip()
 
 
-def _read_file(path, error_code, label):
+def read_text_file(path):
+    """Read bytes, then decode explicitly: no newline translation, no silent replacement."""
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as handle:
-            return handle.read()
+        with open(path, "rb") as handle:
+            raw = handle.read()
+    except FileNotFoundError:
+        raise ContractError("input_not_found", "input file not found: %s" % path)
     except (IOError, OSError) as exc:
-        raise ContractError(error_code, "cannot read %s %s: %s" % (label, path, exc))
+        raise ContractError("input_unreadable", "cannot read input file %s: %s" % (path, exc))
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ContractError(
+            "input_encoding",
+            "input file %s is not valid UTF-8 (byte %d): %s" % (path, exc.start, exc.reason),
+        )
+    return text, sha256_bytes(raw), len(raw)
 
 
 def load_text(params):
@@ -214,22 +233,36 @@ def load_text(params):
     """
     if params.get("src"):
         path = params["src"]
-        return _read_file(path, "input_empty", "text file"), "src", path, None
+        text, digest, size = read_text_file(path)
+        return {
+            "text": text, "source": "src", "path": path, "structured": None,
+            "sha256": digest, "bytes": size,
+        }
     value = params.get("text")
     if value is None:
         raise ContractError("input_empty", "either 'text' or 'src' must be provided")
     if isinstance(value, str):
-        return value, "text", None, None
-    if isinstance(value, (dict, list)):
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":")), "text", None, "json"
-    return str(value), "text", None, type(value).__name__
+        text, structured = value, None
+    elif isinstance(value, (dict, list)):
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        structured = "json"
+    else:
+        text, structured = str(value), type(value).__name__
+    raw = text.encode("utf-8")
+    return {
+        "text": text, "source": "text", "path": None, "structured": structured,
+        "sha256": sha256_bytes(raw), "bytes": len(raw),
+    }
 
 
 def load_prompt(params):
     """Return (prompt, source, path, sha256)."""
     if params.get("prompt_file"):
         path = params["prompt_file"]
-        prompt = _read_file(path, "prompt_not_found", "prompt file")
+        try:
+            prompt, _digest, _size = read_text_file(path)
+        except ContractError as exc:
+            raise ContractError("prompt_not_found", exc.message)
         return prompt, "file", path, sha256_text(prompt)
     prompt = params.get("prompt") or ""
     return prompt, "inline", None, sha256_text(prompt)
@@ -1179,15 +1212,17 @@ def prepare(params):
     validate_params(params)
     plan = {"module": CORE_VERSION, "backend": params["backend"]}
 
-    text, text_source, text_path, structured = load_text(params)
+    loaded = load_text(params)
+    text = loaded["text"]
     if not text.strip():
         raise ContractError("input_empty", "the input text is empty")
     plan["text"] = {
-        "source": text_source,
-        "path": text_path,
+        "source": loaded["source"],
+        "path": loaded["path"],
         "chars": len(text),
-        "sha256": sha256_text(text),
-        "structured_input": structured,
+        "bytes": loaded["bytes"],
+        "sha256": loaded["sha256"],
+        "structured_input": loaded["structured"],
     }
 
     prompt, prompt_source, prompt_path, prompt_sha = load_prompt(params)
@@ -1589,7 +1624,11 @@ def extract(params):
                         elapsed_ms=int((time.time() - started) * 1000))
             return data, meta
 
-    backend = make_backend(params)
+    try:
+        backend = make_backend(params)
+    except BackendError as exc:
+        exc.plan = plan
+        raise
     gbnf = build_gbnf(schema, strict_enum=params["strict_enum"])
     attempts_allowed = plan["inference"]["attempts"]
 
@@ -1606,14 +1645,18 @@ def extract(params):
             attempt_temperature = params["temperature"]
             if attempt:
                 attempt_temperature = min(1.0, round(params["temperature"] + 0.1 * attempt, 2))
-            raw, finish_reason, usage = backend.complete(
-                _messages(prepared["prompt"], schema, chunk),
-                gbnf,
-                min(1024, params["max_tokens"] * (2 ** attempt)),
-                attempt_temperature,
-                params["seed"] + attempt,
-                params["timeout"],
-            )
+            try:
+                raw, finish_reason, usage = backend.complete(
+                    _messages(prepared["prompt"], schema, chunk),
+                    gbnf,
+                    min(1024, params["max_tokens"] * (2 ** attempt)),
+                    attempt_temperature,
+                    params["seed"] + attempt,
+                    params["timeout"],
+                )
+            except BackendError as exc:
+                exc.plan = plan
+                raise
             last_raw = raw
             meta["attempts"] += 1
             meta["tokens"]["in"] += usage.get("prompt_tokens") or 0
