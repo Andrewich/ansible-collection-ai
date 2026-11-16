@@ -401,6 +401,10 @@ def main():
         )
         return
 
+    if meta.get("plan_only"):
+        module.exit_json(changed=False, llm=meta, plan=meta.get("plan"))
+        return
+
     if not meta.get("ok"):
         # No facts at all: a failed extraction must not overwrite an existing value.
         module.exit_json(changed=False, llm=meta)

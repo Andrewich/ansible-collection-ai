@@ -18,7 +18,9 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
+import fcntl
 import hashlib
+import http.client
 import ipaddress
 import json
 import os
@@ -30,6 +32,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+urlopen = urllib.request.urlopen
 
 CORE_VERSION = "llm_extract/2.1"
 FIELD_TYPES = ("string", "integer", "number", "boolean", "list")
@@ -1299,6 +1303,240 @@ def make_backend(params):
 # ---------------------------------------------------------------------------
 
 
+DOWNLOAD_CHUNK = 1024 * 1024
+DOWNLOAD_ATTEMPTS = 3
+DOWNLOAD_BACKOFF = (0.0, 0.2, 0.5)
+MODEL_MAGIC = b"GGUF"
+
+
+def model_dir_for(params):
+    if params.get("model_dir"):
+        return str(params["model_dir"])
+    cache_dir = params.get("cache_dir") or default_cache_dir()
+    return os.path.join(cache_dir, "models")
+
+
+def local_model_name(url):
+    """Two URLs with the same basename must not collide in the model directory."""
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    base = os.path.basename(urllib.parse.urlsplit(url).path) or "model.gguf"
+    if not base.lower().endswith(".gguf"):
+        base += ".gguf"
+    return "%s-%s" % (digest, base)
+
+
+def model_meta_path(path):
+    return path + ".meta.json"
+
+
+def read_model_meta(path):
+    try:
+        with open(model_meta_path(path), "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (IOError, OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def write_model_meta(path, payload):
+    directory = os.path.dirname(path)
+    handle, temporary = tempfile.mkstemp(prefix=".meta-", dir=directory)
+    try:
+        os.fchmod(handle, 0o600)
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, model_meta_path(path))
+    except (IOError, OSError):
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+        raise
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(DOWNLOAD_CHUNK), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def check_free_space(directory, needed):
+    if not needed:
+        return
+    stat = os.statvfs(directory)
+    free = stat.f_bavail * stat.f_frsize
+    if free < needed * 1.1:
+        raise ContractError(
+            "insufficient_space",
+            "not enough free space in %s: need %.1f MiB, have %.1f MiB"
+            % (directory, needed * 1.1 / 1048576.0, free / 1048576.0),
+        )
+
+
+def acquire_download_lock(directory, name, timeout):
+    path = os.path.join(directory, ".%s.lock" % name)
+    handle = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    deadline = time.time() + timeout
+    while True:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return handle
+        except (IOError, OSError):
+            if time.time() > deadline:
+                os.close(handle)
+                raise ContractError(
+                    "download_busy",
+                    "another process holds the download lock for %s" % path,
+                )
+            time.sleep(0.05)
+
+
+def release_download_lock(handle):
+    try:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+    finally:
+        os.close(handle)
+
+
+def _remove_quietly(path):
+    if path and os.path.exists(path):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def download_to_temp(url, directory, timeout, expected_sha):
+    """Stream to a private temporary file; return (path, digest, bytes)."""
+    last_error = None
+    for attempt in range(DOWNLOAD_ATTEMPTS):
+        if attempt:
+            time.sleep(DOWNLOAD_BACKOFF[min(attempt, len(DOWNLOAD_BACKOFF) - 1)])
+        temporary = None
+        try:
+            with urlopen(url, timeout=timeout) as response:
+                length = response.headers.get("Content-Length")
+                expected_size = int(length) if length not in (None, "") else None
+                check_free_space(directory, expected_size or 0)
+                handle, temporary = tempfile.mkstemp(prefix=".dl-", dir=directory)
+                os.fchmod(handle, 0o600)
+                digest = hashlib.sha256()
+                written = 0
+                magic = b""
+                with os.fdopen(handle, "wb") as stream:
+                    while True:
+                        chunk = response.read(DOWNLOAD_CHUNK)
+                        if not chunk:
+                            break
+                        if len(magic) < len(MODEL_MAGIC):
+                            magic = (magic + chunk)[: len(MODEL_MAGIC)]
+                        digest.update(chunk)
+                        written += len(chunk)
+                        stream.write(chunk)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            if magic != MODEL_MAGIC:
+                raise ContractError(
+                    "model_invalid",
+                    "downloaded file does not start with GGUF magic: %r" % magic,
+                )
+            if expected_size is not None and written != expected_size:
+                raise ContractError(
+                    "download_failed",
+                    "download ended after %d of %d bytes" % (written, expected_size),
+                )
+            if expected_sha and digest.hexdigest() != expected_sha:
+                raise ContractError(
+                    "model_checksum_mismatch",
+                    "downloaded file sha256 %s does not match %s"
+                    % (digest.hexdigest(), expected_sha),
+                )
+            return temporary, digest.hexdigest(), written
+        except ContractError:
+            _remove_quietly(temporary)
+            raise
+        except socket.timeout:
+            _remove_quietly(temporary)
+            last_error = ContractError(
+                "download_timeout", "download timed out after %ss" % timeout
+            )
+        except (urllib.error.URLError, http.client.HTTPException, ConnectionError,
+                OSError) as exc:
+            _remove_quietly(temporary)
+            last_error = ContractError(
+                "download_failed", "download of %s failed: %s" % (url, exc)
+            )
+    raise last_error or ContractError("download_failed", "download of %s failed" % url)
+
+
+def _cached_state(path, expected_sha):
+    """Return True when the local copy is known to be complete."""
+    if not os.path.exists(path):
+        return False
+    if expected_sha:
+        return file_sha256(path) == expected_sha
+    meta = read_model_meta(path)
+    if meta is None:
+        return True  # nothing to compare against, assume a complete file
+    return meta.get("bytes") == os.path.getsize(path)
+
+
+def ensure_model(params):
+    """Download the model once, atomically, and return the local path plus provenance."""
+    url = params["model_url"]
+    directory = model_dir_for(params)
+    path = os.path.join(directory, local_model_name(url))
+    expected_sha = (params.get("model_sha256") or "").lower() or None
+    started = time.time()
+
+    if _cached_state(path, expected_sha):
+        return {
+            "path": path, "download": "cached", "url": url,
+            "bytes": os.path.getsize(path), "sha256": expected_sha,
+            "seconds": 0.0,
+        }
+
+    if os.path.exists(path) and not params.get("refresh") and not expected_sha:
+        meta = read_model_meta(path)
+        if meta is not None:
+            raise ContractError(
+                "model_stale",
+                "local model %s does not match the recorded size (%s bytes); pass "
+                "refresh=true to download it again"
+                % (path, meta.get("bytes")),
+            )
+    if os.path.exists(path) and not params.get("refresh") and expected_sha:
+        raise ContractError(
+            "model_stale",
+            "local model %s does not match model_sha256; pass refresh=true to download "
+            "it again" % path,
+        )
+
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    lock = acquire_download_lock(directory, os.path.basename(path),
+                                 params["download_timeout"])
+    try:
+        if _cached_state(path, expected_sha):
+            return {
+                "path": path, "download": "cached", "url": url,
+                "bytes": os.path.getsize(path), "sha256": expected_sha,
+                "seconds": round(time.time() - started, 2),
+            }
+        temporary, digest, written = download_to_temp(
+            url, directory, params["download_timeout"], expected_sha
+        )
+        os.replace(temporary, path)
+        write_model_meta(path, {"url": url, "sha256": digest, "bytes": written})
+        return {
+            "path": path, "download": "fresh", "url": url, "sha256": digest,
+            "bytes": written, "seconds": round(time.time() - started, 2),
+        }
+    finally:
+        release_download_lock(lock)
+
+
 def prepare(params):
     """Validate everything that can be validated without a model; return the plan."""
     validate_params(params)
@@ -1341,7 +1579,36 @@ def prepare(params):
         schema = fields_to_schema(params.get("fields"))
     plan["schema"] = validate_schema(schema)
 
-    model_path = params.get("model_path")
+    cache_dir = params.get("cache_dir") or default_cache_dir()
+    plan_only = False
+    downloads = {"download": False, "url": None, "sha256": None, "bytes": None, "seconds": 0.0}
+    if params.get("model_url"):
+        url = params["model_url"]
+        planned = os.path.join(model_dir_for(params), local_model_name(url))
+        if params.get("check_mode"):
+            plan_only = True
+            model_path = planned
+            downloads = {
+                "download": "skipped", "url": url, "sha256": params.get("model_sha256"),
+                "bytes": None, "seconds": 0.0,
+            }
+        else:
+            info = ensure_model(params)
+            model_path = info["path"]
+            params["model_path"] = model_path
+            downloads = {
+                "download": info["download"], "url": info["url"],
+                "sha256": info["sha256"], "bytes": info["bytes"],
+                "seconds": info["seconds"],
+            }
+        if not params.get("model_sha256"):
+            downloads["warning"] = (
+                "model_sha256 is not set: only the GGUF magic and Content-Length protect "
+                "this download; pin the digest for a reproducible model"
+            )
+    else:
+        model_path = params.get("model_path")
+
     model_id = params.get("model_id") or (os.path.basename(model_path) if model_path else None)
     model_exists = bool(model_path) and os.path.exists(model_path)
     plan["model"] = {
@@ -1350,6 +1617,7 @@ def prepare(params):
         "exists": model_exists,
         "size": os.path.getsize(model_path) if model_exists else None,
     }
+    plan["model"].update(downloads)
 
     try:
         chunks = split_text(text, int(params["max_input_chars"]), params["on_too_long"])
@@ -1389,18 +1657,20 @@ def prepare(params):
     }
     plan["cache"] = {
         "enabled": bool(params.get("cache")),
-        "dir": params.get("cache_dir") or default_cache_dir(),
+        "dir": cache_dir,
         "key": build_cache_key(
             params, model_id, model_path, prompt_sha,
             json.dumps(schema, sort_keys=True), plan["text"]["sha256"],
         ),
     }
 
-    if params["backend"] == "python":
+    if params["backend"] == "python" and not plan_only:
         if not model_path:
             raise ContractError("model_not_found", "model_path is required for backend 'python'", plan)
         if not model_exists:
             raise ContractError("model_not_found", "model file not found: %s" % model_path, plan)
+    if params["backend"] == "python" and plan_only and not model_path:
+        raise ContractError("model_not_found", "model_path or model_url is required", plan)
 
     return {
         "plan": plan,
@@ -1409,6 +1679,7 @@ def prepare(params):
         "chunks": chunks,
         "prompt": prompt,
         "prompt_sha": prompt_sha,
+        "plan_only": plan_only,
     }
 
 
@@ -1676,10 +1947,30 @@ def extract(params):
     text = prepared["text"]
     chunks = prepared["chunks"]
 
+    model_meta = {
+        "id": plan["model"]["id"], "path": plan["model"]["path"],
+        "size": plan["model"]["size"],
+        "download": plan["model"].get("download", False),
+        "url": plan["model"].get("url"),
+        "sha256": plan["model"].get("sha256"),
+        "bytes": plan["model"].get("bytes"),
+        "seconds": plan["model"].get("seconds", 0.0),
+    }
+    if prepared.get("plan_only"):
+        return {}, {
+            "ok": True,
+            "plan_only": True,
+            "check_mode": True,
+            "model": model_meta,
+            "plan": plan,
+            "notes": [
+                "check_mode: the model would be downloaded to %s" % plan["model"]["path"]
+            ],
+        }
+
     meta = {
         "ok": False,
-        "model": {"id": plan["model"]["id"], "path": plan["model"]["path"],
-                  "size": plan["model"]["size"]},
+        "model": model_meta,
         "prompt_sha256": prepared["prompt_sha"],
         "schema_sha256": sha256_text(json.dumps(schema, sort_keys=True)),
         "input_sha256": plan["text"]["sha256"],
@@ -1784,6 +2075,8 @@ def extract(params):
         raise
     meta.update(info, ok=True, elapsed_ms=int((time.time() - started) * 1000))
 
+    if plan["model"].get("warning"):
+        meta["warnings"] = [plan["model"]["warning"]]
     if params.get("debug"):
         meta["raw_output"] = last_raw
         meta["projection_schema"] = projection_schema(schema)
