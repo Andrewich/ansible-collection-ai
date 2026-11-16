@@ -1,0 +1,3 @@
+Read a systemd journal excerpt with error lines.
+List every service or program that logged an error.
+Copy names and timestamps exactly as printed; use null when absent.

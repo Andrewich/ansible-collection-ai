@@ -62,6 +62,25 @@ python3 -m venv .venv
 используют один и тот же модуль: Redfish, лог nginx, тикет поддержки. Разница — только
 промпт-файл и схема.
 
+### Демо: ночной триаж журнала ВМ
+
+[playbooks/journal_triage.yml](playbooks/journal_triage.yml) читает `journalctl -p err` на
+каждой ВМ, отправляет текст на контроллер и достаёт моделью 1.2B список упавших сервисов и
+окно времени.
+
+```bash
+# воспроизводимо, без живого журнала
+./scripts/run-playbook.sh playbooks/journal_triage.yml -i inventory/demo.ini \
+    -e journal_source=fixtures/journal/errors_sample.log
+
+# по живым хостам
+./scripts/run-playbook.sh playbooks/journal_triage.yml -i inventory.ini
+```
+
+Модель по умолчанию — 1.2B (`.models/LFM2-1.2B-Extract-Q4_K_M.gguf`); 350M и 230M на этом
+журнале ошибаются, поэтому в демо они не используются. `journal_fail_on_errors=true`
+превращает отчёт в проверку: плейбук падает, если найден хоть один упавший сервис.
+
 ## Что гарантирует модуль
 
 | Свойство | Как обеспечено |

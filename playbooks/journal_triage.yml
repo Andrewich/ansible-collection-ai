@@ -1,0 +1,78 @@
+---
+# Journal triage on a VM fleet: journalctl -> local 1.2B model -> JSON facts.
+#
+# Reproducible demo from a fixture (no journal on the demo host needed):
+#   ./scripts/run-playbook.sh playbooks/journal_triage.yml -i localhost, \
+#       -e journal_source=fixtures/journal/errors_sample.log
+#
+# Live run against the managed hosts:
+#   ./scripts/run-playbook.sh playbooks/journal_triage.yml -i inventory.ini
+#
+# The model is loaded on the controller; the journal is read on each host.
+- name: Journal triage on the VM fleet
+  hosts: all
+  gather_facts: false
+  vars:
+    # Empty means "read the live journal"; a path means "use this fixture".
+    journal_source: ""
+    journal_priority: err
+    journal_lines: 6
+    journal_fail_on_errors: false
+    llm_model_path: "{{ playbook_dir }}/../.models/LFM2-1.2B-Extract-Q4_K_M.gguf"
+    journal_file: >-
+      {{ journal_source if journal_source.startswith('/')
+         else (playbook_dir ~ '/../' ~ journal_source) }}
+    journal_text: "{{ lookup('file', journal_file) if journal_source | length > 0 else journal_raw.stdout | default('') }}"
+    journal_fields:
+      - name: failed_services
+        type: list
+        description: "Program or unit names that logged a failure, for example Backup service, kernel, postgresql, sshd, nginx, dnsmasq"
+      - name: first_error_time
+        type: string
+        description: "Timestamp of the earliest line, for example Feb 11 03:00:01"
+      - name: last_error_time
+        type: string
+        description: "Timestamp of the latest line, for example Feb 11 03:12:00"
+  tasks:
+    - name: 1. Collect the last error lines from the journal
+      ansible.builtin.command:
+        cmd: "journalctl -p {{ journal_priority }} -n {{ journal_lines }} --no-pager"
+      become: true
+      check_mode: false
+      changed_when: false
+      failed_when: false
+      register: journal_raw
+      when: journal_source | length == 0
+
+    - name: 2. Ask the local 1.2B model what failed
+      local.llm.llm_extract:
+        text: "{{ journal_text }}"
+        prompt_file: "{{ playbook_dir }}/../prompts/journal_triage.txt"
+        fields: "{{ journal_fields }}"
+        model_path: "{{ llm_model_path }}"
+        cache_dir: "{{ playbook_dir }}/../.tmp/llm-cache"
+        max_tokens: 512
+        on_ungrounded: keep
+      delegate_to: localhost
+      register: triage
+      when: journal_text | length > 0
+
+    - name: 3. Show what failed on this host
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          failed_services: "{{ triage.ansible_facts.llm_result.failed_services | default([]) }}"
+          window: "{{ triage.ansible_facts.llm_result.first_error_time | default('n/a') }} - {{ triage.ansible_facts.llm_result.last_error_time | default('n/a') }}"
+          unverified: "{{ triage.llm.unverified | default([]) }}"
+      when: journal_text | length > 0
+
+    - name: 4. Fail the play when errors were found (opt-in)
+      ansible.builtin.assert:
+        that:
+          - triage.ansible_facts.llm_result.failed_services | default([]) | length == 0
+        fail_msg: "Errors on {{ inventory_hostname }}: {{ triage.ansible_facts.llm_result.failed_services }}"
+        success_msg: "No journal errors on {{ inventory_hostname }}"
+        quiet: true
+      when:
+        - journal_fail_on_errors | bool
+        - journal_text | length > 0

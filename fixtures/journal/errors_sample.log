@@ -1,0 +1,6 @@
+Feb 11 03:00:01 srv01 systemd[1]: Failed to start Backup service.
+Feb 11 03:00:02 srv01 kernel: EXT4-fs error (device sda1): ext4_find_entry:1455: inode #2: comm rsyslogd
+Feb 11 03:05:00 srv01 postgresql[123]: FATAL: connection limit exceeded for non-superusers
+Feb 11 03:10:00 srv01 sshd[456]: error: kex_exchange_identification: Connection closed by remote host
+Feb 11 03:11:00 srv01 nginx[789]: 2025/02/11 03:11:00 [error] connect() failed (111: Connection refused)
+Feb 11 03:12:00 srv01 dnsmasq[900]: failed to send packet: Network is unreachable
