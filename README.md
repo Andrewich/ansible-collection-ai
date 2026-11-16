@@ -1,56 +1,74 @@
-# `andrewich.ai` — текст → JSON локальной LLM
+# `andrewich.ai` — unstructured text → JSON with a local LLM
 
-Ansible-коллекция: модуль и lookup-плагин, которые превращают неструктурированный текст
-в JSON по заданной схеме с помощью маленькой GGUF-модели, запущенной локально.
-Инференс выполняется локально, данные не покидают контроллер. Единственный сетевой контакт —
-однократное скачивание GGUF-модели по HTTPS, и только если явно задан `model_url`.
+An Ansible collection with a module and a lookup plugin that turn unstructured text into JSON
+matching a schema, using a small GGUF model running on the controller. Inference stays on the
+host and no data leaves it; the only network contact is an optional one-time HTTPS download of
+the model file when `model_url` is set.
 
 ```
-текст + промпт + схема ──► GBNF-грамматика ──► llama.cpp (350M) ──► JSON ──► проверки ──► факты
+text + prompt + schema ──► GBNF grammar ──► llama.cpp (350M) ──► JSON ──► checks ──► facts
 ```
 
-Модель по умолчанию — `LFM2-350M-Extract` (220 МБ), запускается на контроллере.
+The default model is `LFM2-350M-Extract` (220 MB). Nothing about Redfish, nginx logs or support
+tickets is hard-coded: a domain is a prompt file plus a schema.
 
-## Быстрый старт
+## Installation
 
 ```bash
-# 1. модель
-./scripts/fetch_model.sh
+# from git (default branch)
+ansible-galaxy collection install git+https://github.com/Andrewich/ansible-collection-ai.git
 
-# 2. окружение
-python3 -m venv .venv
-.venv/bin/pip install -r scripts/requirements.txt --only-binary=:all: \
-    --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
-.venv/bin/pip install ansible-core
-
-# 3. проверка: 8 задач, реальная модель + mock, без BMC
-./scripts/run-playbook.sh playbooks/introspect_llm_extract.yml
-
-# 4. тесты
-.venv/bin/python -m unittest discover -s tests -p 'test_*.py'
+# pinned release, recommended for production
+ansible-galaxy collection install git+https://github.com/Andrewich/ansible-collection-ai.git,0.4.0
 ```
 
-`inventory.ini` содержит `ansible_python_interpreter` и `llm_model` — поправьте под себя.
-
-## Использование
+`requirements.yml`:
 
 ```yaml
-- name: redfish -> facts
+collections:
+  - name: https://github.com/Andrewich/ansible-collection-ai.git
+    type: git
+    version: 0.4.0
+```
+
+Then `ansible-galaxy collection install -r requirements.yml`.
+
+The collection itself has no Python dependencies beyond `ansible-core >= 2.15`. The `python`
+backend needs `llama-cpp-python` in the interpreter that runs the module (usually the controller):
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install "llama-cpp-python==0.3.37" --only-binary=:all: \
+    --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+.venv/bin/pip install ansible-core
+```
+
+Prebuilt wheels are important on older distributions: prebuilt `llama.cpp` binaries need
+`GLIBCXX_3.4.30` and do not start on CentOS Stream 9, while the wheel is manylinux-based.
+
+## Quick start
+
+```yaml
+- name: Redfish payload -> facts
   andrewich.ai.llm_extract:
     text: "{{ payload.content }}"
     prompt_file: prompts/redfish_extract.txt
     fields: "{{ lookup('file', 'vars/redfish_fields.yml') | from_yaml }}"
-    model_path: /opt/llm/models/LFM2-350M-Extract-Q4_K_M.gguf
+    model_url: https://huggingface.co/LiquidAI/LFM2-350M-Extract-GGUF/resolve/main/LFM2-350M-Extract-Q4_K_M.gguf
+    model_sha256: 687a31c3e7864647aa181e1feb156e4e5da33978c174d7dbf0d289f6014a5621
+    strict_download: true
   delegate_to: localhost
   register: extracted
 
-- name: действовать по фактам
+- name: Act on the facts
   debug:
     msg: "{{ extracted.ansible_facts.llm_result.serial }}"
 ```
 
+The same pipeline as a template, without facts and without `delegate_to`:
+
 ```yaml
-- name: то же самое в шаблоне, без facts и delegate_to
+- name: Parse an nginx error
   set_fact:
     parsed: >-
       {{ lookup('andrewich.ai.llm_extract', payload,
@@ -58,140 +76,131 @@ python3 -m venv .venv
                 json_schema=nginx_schema) }}
 ```
 
-Три домена в [playbooks/introspect_llm_extract.yml](playbooks/introspect_llm_extract.yml)
-используют один и тот же модуль: Redfish, лог nginx, тикет поддержки. Разница — только
-промпт-файл и схема.
+The examples in [`playbooks/`](playbooks/) cover three domains with one module (Redfish,
+nginx logs, support ticket) plus a native Redfish compaction filter. The difference is only the
+prompt file and the schema.
 
-### Демо: ночной триаж журнала ВМ
+## What the module guarantees
 
-[playbooks/journal_triage.yml](playbooks/journal_triage.yml) читает `journalctl -p err` на
-каждой ВМ, отправляет текст на контроллер и достаёт моделью 1.2B список упавших сервисов и
-окно времени.
-
-```bash
-# воспроизводимо, без живого журнала
-./scripts/run-playbook.sh playbooks/journal_triage.yml -i inventory/demo.ini \
-    -e journal_source=fixtures/journal/errors_sample.log
-
-# по живым хостам
-./scripts/run-playbook.sh playbooks/journal_triage.yml -i inventory.ini
-```
-
-Модель по умолчанию — 1.2B (`.models/LFM2-1.2B-Extract-Q4_K_M.gguf`); 350M и 230M на этом
-журнале ошибаются, поэтому в демо они не используются. `journal_fail_on_errors=true`
-превращает отчёт в проверку: плейбук падает, если найден хоть один упавший сервис.
-
-## Что гарантирует модуль
-
-| Свойство | Как обеспечено |
+| Property | How |
 |---|---|
-| Валидный JSON заданной формы | GBNF-грамматика из схемы: лишний ключ или строка вместо числа невозможны |
-| «Не знаю» выразимо | каждый nullable-лист грамматики имеет альтернативу `null`; отсутствующие значения попадают в `llm.missing` |
-| Выдумки не проходят молча | grounding по границам токенов в том чанке, который выдал значение; `on_ungrounded: drop` удаляет ненайденные |
-| Данные не уходят с хоста | `server`-бэкенд принимает только loopback; инференс локальный |
-| Модель можно не качать вручную | `model_url` скачивает GGUF один раз, атомарно и под lock |
-| Mock не просочится в прод | `backend: mock` работает только с `allow_mock: true` |
-| Enum нормализуется | `Dell Inc.` → `Dell`, `Hewlett Packard Enterprise` → `HPE` (по вхождению, без доменных таблиц) |
-| Повторный прогон дешёвый | кэш по хэшу модели, промпта, схемы, входа и политик; проверки применяются и к кэшу |
-| Секреты не утекают | всё локально, кэш 0700/0600, `cache: false` для чувствительного |
+| JSON of the requested shape | GBNF grammar generated from the schema: an extra key or a string where a number belongs cannot be produced |
+| "I don't know" is expressible | every nullable grammar leaf has a `null` alternative; absent values land in `llm.missing` |
+| Inventions do not pass silently | token-bounded grounding in the chunk that produced the value; `on_ungrounded: drop` (default) removes values not found in the source |
+| Data does not leave the host | inference is local; the `server` backend accepts loopback only; redirects and proxies are refused |
+| The model need not be fetched by hand | `model_url` downloads the GGUF once, atomically, under a file lock |
+| Mock cannot leak into production | `backend: mock` requires `allow_mock: true` |
+| Enums are normalised | `Dell Inc.` → `Dell`, `Hewlett Packard Enterprise` → `HPE`, by containment, no domain tables |
+| Re-runs are cheap | cache keyed by model, prompt, schema, input and policies; the same policies are re-applied to cached answers |
+| Secrets stay local | everything runs offline, cache is 0700/0600, `cache: false` for sensitive input |
 
-Метаданные ответа (`llm`) — часть контракта: `missing`, `unverified`, `dropped`, `checked`,
-`grounded`, `tokens`, `cache_hit`, `normalized`, `rejected`, хэши промпта/схемы/входа.
-По ним видно, откуда взялось каждое значение.
+The `llm` metadata is part of the contract: `missing`, `unverified`, `dropped`, `checked`,
+`grounded`, `tokens`, `cache_hit`, `normalized`, `rejected`, prompt/schema/input hashes, and
+`model.download` (`fresh` / `cached` / `skipped` / `false`).
 
-## Замеры
+## Model download
 
-2 vCPU, без GPU, LFM2-350M-Extract Q4_K_M:
+If `model_url` is set, `prepare()` fetches the model before inference:
 
-| Сценарий | Результат |
-|---|---|
-| 294 символа сжатого текста, 10 полей | 10/10 фактов, 492 in / 131 out токена, ~6.1 с |
-| тот же текст повторно | `cache_hit: true`, `attempts: 0`, ~0.01 с |
-| документ без 8 из 10 полей | 2 факта; 8 выдуманных значений поймано и удалено, `missing` заполнен |
-| `backend: server` (`python -m llama_cpp.server`) | те же факты, ~7.4 с |
-| `on_too_long: split`, 1.2 КБ, 2 чанка | те же 10 фактов, ~14.4 с |
+- HTTPS only, and `backend: python` only (the `server` backend loads the model itself);
+- the local name is `<sha256(url)[:16]>-<basename>.gguf` in `model_dir`
+  (default `<cache_dir>/models`), so equal basenames never collide;
+- the file is streamed in ~1 MB chunks into `mkstemp` → `fsync` → `os.replace`; the first four
+  bytes must be `GGUF` and SHA-256 is computed on the fly;
+- concurrent tasks are serialised with a lock file and `fcntl.flock`, so with `forks > 1` one
+  process downloads and the rest wait;
+- `model_sha256` is strongly recommended; without it only the GGUF magic and `Content-Length`
+  protect the download (the module emits a warning), and `strict_download: true` without a
+  digest is an error (`model_checksum_required`);
+- `check_mode` downloads nothing and returns the plan instead.
 
-Важное из исследования: **350M без посторонней помощи на этой задаче слаба** (~47 % полей),
-поэтому и появились grounding, `on_ungrounded` и строгий бюджет ввода. Компакция входа — снаружи
-модуля и в виде «ключ = значение»: длинные JSON-пути сбивают модель (`Oem.Dell...` → `vendor:
-"Oem.Dell"`), короткие ключи дают 10/10.
+> **First run on a large fleet.** The model is ~220 MB. If it is missing on the controller, the
+> first play downloads it once, but with `forks: 50` dozens of tasks will queue on the lock and
+> wall time grows. Run a separate warm-up play with `throttle: 1` (or a single
+> `andrewich.ai.llm_extract` on `localhost`), then run the real play — every task will see the
+> finished file.
 
-## Скачивание модели
+## Backends
 
-Модель не обязательно класть на диск руками:
-
-```yaml
-- andrewich.ai.llm_extract:
-    text: "{{ payload }}"
-    prompt_file: prompts/redfish_extract.txt
-    fields: "{{ fields }}"
-    model_url: https://huggingface.co/LiquidAI/LFM2-350M-Extract-GGUF/resolve/main/LFM2-350M-Extract-Q4_K_M.gguf
-    model_sha256: 687a31c3e7864647aa181e1feb156e4e5da33978c174d7dbf0d289f6014a5621
-    strict_download: true
-```
-
-- только `https` и только `backend: python` (серверный бэкенд загружает модель сам);
-- файл кладётся в `model_dir` (по умолчанию `<cache_dir>/models`) под именем
-  `<sha256(url)[:16]>-<basename>.gguf`, поэтому одинаковые basename не конфликтуют;
-- запись потоковая (чанки ~1 МБ) в `mkstemp` → `fsync` → `os.replace`, первые 4 байта
-  обязаны быть `GGUF`, hash считается на лету;
-- параллельные задачи сериализуются lock-файлом и `flock`, так что при `forks > 1`
-  качает один процесс, остальные ждут;
-- `model_sha256` настоятельно рекомендуется: без него остаются только магия GGUF и
-  `Content-Length` (модуль пишет предупреждение), а `strict_download: true` без хеша — отказ.
-
-> **Первый запуск на большом парке.** Модель 219 МБ. Если её нет на контроллере, первый
-> плейбук скачает её один раз, но при `forks: 50` десятки задач одновременно встанут в
-> ожидание блокировки, а суммарное время вырастет. Сделайте отдельный прогревающий play с
-> `throttle: 1` (или одним `andrewich.ai.llm_extract` на `localhost`), а рабочие прогоны
-> запускайте после него — тогда все задачи увидят готовый файл.
-
-## Бэкенды
-
-| Бэкенд | Как | Когда |
+| Backend | How | When |
 |---|---|---|
-| `python` (по умолчанию) | `llama-cpp-python` в процессе модуля | до нескольких десятков хостов; ноль зависимостей кроме колеса |
-| `server` | OpenAI-совместимый API, грамматика в теле запроса | много хостов, модель горячая, общий процесс |
-| `mock` | канированный ответ | CI и тесты |
+| `python` (default) | `llama-cpp-python` inside the module process | up to a few dozen hosts; no dependencies except the wheel |
+| `server` | OpenAI-compatible API, grammar in the request body | many hosts, hot model, shared process |
+| `mock` | canned answer | CI and tests, only with `allow_mock: true` |
 
-Сервер поднимается **без бинарников llama.cpp**:
+The server runs without any `llama.cpp` binaries:
 
 ```bash
 ./scripts/run-llama-server.sh --port 8080
-# или systemd: scripts/llama-server.service
+# or scripts/llama-server.service for systemd
 ```
 
-Это важно для старых дистрибутивов: предсобранный `llama.cpp` требует `GLIBCXX_3.4.30`
-(на CentOS Stream 9 не запускается), а колесо `llama-cpp-python` собрано под manylinux и работает.
-
-## Структура
+## Repository layout
 
 ```
-ansible_collections/local/llm/          коллекция (galaxy.yml, meta/runtime.yml)
-  plugins/module_utils/llm_core.py      ядро: грамматика, проверки, кэш, бэкенды
-  plugins/modules/llm_extract.py        модуль (тонкая обёртка)
-  plugins/lookup/llm_extract.py         lookup поверх того же ядра
-  plugins/filter/redfish_identity.py    компакция Redfish в "путь = значение" (без awk/jq)
-docs/contract.md                        контракт: параметры, ошибки, политики, замеры
-prompts/*.txt                           инструкции для модели (версионируются)
-schemas/*.json                          JSON Schema для вложенных структур
-vars/redfish_fields.yml                 схема фактов Redfish (домен, не модуль)
-fixtures/                               «грязные» payload-ы Dell / HPE / Inspur
-playbooks/introspect_llm_extract.yml    сквозная проверка: 8 задач, реальная модель + mock
-playbooks/redfish_identity.yml          пример: vendor/model/CPU из реальных Huawei и Fujitsu
-tests/test_*.py                         159 тестов: контракт, конвейер, регрессии
-scripts/                                модель, сервер, запуск плейбука, requirements
+galaxy.yml                 collection metadata (namespace andrewich, name ai)
+meta/runtime.yml           requires_ansible
+README.md / README.ru.md   this file, English and Russian
+docs/contract.md           the full contract (parameters, errors, policies, measurements)
+docs/contract.ru.md        same in Russian
+plugins/module_utils/      llm_core.py — grammar, validation, cache, backends
+plugins/modules/           llm_extract.py — thin AnsibleModule wrapper
+plugins/lookup/            llm_extract.py — the same core for templates
+plugins/filter/            redfish_identity.py — Redfish compaction without jq/awk
+prompts/                   model instructions, versioned
+schemas/                   JSON Schema for nested structures
+vars/                      domain fact schemas (Redfish)
+fixtures/                  real vendor payloads (Dell, HPE, Inspur, Huawei, Fujitsu)
+playbooks/                 end-to-end examples
+tests/                     unit tests, no network, no model required
+scripts/                   model download, llama-server, build & install
 ```
 
-## Границы и оговорки
+## Development
 
-- Выход — только JSON. YAML/XML/свободный текст не поддерживаются: грамматика их не гарантирует.
-- Модуль ничего не качает и ничего не исполняет. Вход — `uri`, `command`, `slurp`, lookup.
-  Результат — данные: не подставляйте его в `shell`/`command` без проверки по схеме.
-- Детерминированного слоя (алиасы/JSON-пути) нет: `aliases` в `fields` отвергается с
-  `schema_invalid`. Такой слой — отдельный шаг до вызова модуля.
-- Проекция фактов отличается от envelope: `null` и ungrounded-значения удалены, поэтому факты
-  валидируются по `projection_schema`, а не по исходной схеме (см. `docs/contract.md` §5).
-- 350M годится для 0.5–1.5 КБ чистого текста; больше — `on_too_long: split` или модель 1.2B
-  (проверено: 93 % полей без посторонней помощи, но в 3 раза медленнее).
-- `ansible-test sanity` не прогонялся: нужны `pylint`/`voluptuous`. Структура коллекции готова.
+```bash
+.venv/bin/python -m unittest discover -s tests -p 'test_*.py'   # 197 tests
+./scripts/build-and-install.sh                                   # build + install into ./.collections
+./scripts/run-playbook.sh playbooks/introspect_llm_extract.yml   # end-to-end, real model + mock
+```
+
+`ansible.cfg` points `collections_paths` at `./.collections`, so playbooks always use the
+installed collection exactly as a user would.
+
+## Measurements
+
+2 vCPU, no GPU, LFM2-350M-Extract Q4_K_M:
+
+| Scenario | Result |
+|---|---|
+| 294 chars of compact text, 10 fields | 10/10 facts, 492 in / 131 out tokens, ~6 s |
+| the same text again | `cache_hit: true`, `attempts: 0`, ~0.01 s |
+| document missing 8 of 10 fields | 2 facts; 8 invented values caught and removed, `missing` filled |
+| `backend: server` (`python -m llama_cpp.server`) | same facts, ~7.4 s |
+| `on_too_long: split`, 1.2 KB, 2 chunks | same 10 facts, ~14 s |
+| model download, 219 MB | 2.7 s, `download: fresh`, then `cached` |
+
+What the research showed: **350M is weak on this task on its own** (~47% of fields), which is why
+grounding, `on_ungrounded` and a strict input budget exist. Input compaction belongs outside the
+module and should look like `key = value`: long JSON paths confuse the model
+(`Oem.Dell...` → `vendor: "Oem.Dell"`), short keys give 10/10.
+
+## Trust boundary and limitations
+
+- Output is JSON only. YAML/XML/free text are not supported: the grammar cannot guarantee them.
+- The module downloads the model and nothing else; it never executes anything. The result is
+  data — do not feed it to `shell`/`command` without an `assert` on the schema and values.
+- Prompts and schemas are trusted artifacts; the document is untrusted and is never executed.
+- There is no deterministic alias/JSON-path layer: `aliases` in `fields` is rejected with
+  `schema_invalid`. That step belongs before the module.
+- Fact projection differs from the validated envelope: `null` and ungrounded values are removed,
+  so facts validate against `projection_schema`, not the original schema (see
+  [the contract](docs/contract.md), §5).
+- 350M suits 0.5–1.5 KB of clean text; for more use `on_too_long: split` or a 1.2B model
+  (93% of fields unaided, three times slower).
+- `ansible-test sanity` has not been run yet (it needs `pylint`/`voluptuous`); the collection
+  layout is ready for it.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).

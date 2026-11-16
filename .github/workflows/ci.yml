@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install ansible-core
+        run: pip install "ansible-core>=2.15,<2.18"
+
+      - name: Unit tests (no model, no network)
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Build the collection
+        run: ansible-galaxy collection build --output-path dist
+
+      - name: Install it the way a user would
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.ci-collections"
+          ansible-galaxy collection install dist/andrewich-ai-*.tar.gz \
+            --collections-path "$GITHUB_WORKSPACE/.ci-collections"
+
+      - name: Documentation renders
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/.ci-collections
+        run: |
+          ansible-doc andrewich.ai.llm_extract > /dev/null
+          ansible-doc -t lookup andrewich.ai.llm_extract > /dev/null
