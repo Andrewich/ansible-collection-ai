@@ -19,7 +19,7 @@ andrewich.ai (the repository root is the collection root)
 ```
 
 ```bash
-ansible-galaxy collection install git+https://github.com/Andrewich/ansible-collection-ai.git,0.4.0
+ansible-galaxy collection install git+https://github.com/Andrewich/ansible-collection-ai.git,v0.4.0
 ```
 
 ```yaml

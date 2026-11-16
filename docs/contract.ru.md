@@ -19,7 +19,7 @@ andrewich.ai (корень репозитория = корень коллекц�
 ```
 
 ```bash
-ansible-galaxy collection install git+https://github.com/Andrewich/ansible-collection-ai.git,0.4.0
+ansible-galaxy collection install git+https://github.com/Andrewich/ansible-collection-ai.git,v0.4.0
 ```
 
 ```yaml

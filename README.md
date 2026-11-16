@@ -19,7 +19,7 @@ tickets is hard-coded: a domain is a prompt file plus a schema.
 ansible-galaxy collection install git+https://github.com/Andrewich/ansible-collection-ai.git
 
 # pinned release, recommended for production
-ansible-galaxy collection install git+https://github.com/Andrewich/ansible-collection-ai.git,0.4.0
+ansible-galaxy collection install git+https://github.com/Andrewich/ansible-collection-ai.git,v0.4.0
 ```
 
 `requirements.yml`:
@@ -28,7 +28,7 @@ ansible-galaxy collection install git+https://github.com/Andrewich/ansible-colle
 collections:
   - name: https://github.com/Andrewich/ansible-collection-ai.git
     type: git
-    version: 0.4.0
+    version: v0.4.0
 ```
 
 Then `ansible-galaxy collection install -r requirements.yml`.
