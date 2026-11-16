@@ -51,7 +51,7 @@
         identity_lines: >-
           {{ identity_lines | default([]) + [{
                'file': item.item | basename,
-               'text': item.content | b64decode | local.llm.redfish_identity
+               'text': item.content | b64decode | andrewich.ai.redfish_identity
              }] }}
       loop: "{{ raw_payloads.results }}"
       loop_control:
@@ -65,7 +65,7 @@
         label: "{{ item.file }}"
 
     - name: Extract vendor, model and processors
-      local.llm.llm_extract:
+      andrewich.ai.llm_extract:
         text: "{{ item.text }}"
         prompt_file: "{{ playbook_dir }}/../prompts/redfish_identity.txt"
         fields: "{{ identity_fields }}"

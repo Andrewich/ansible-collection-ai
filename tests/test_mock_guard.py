@@ -10,13 +10,11 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(ROOT, "ansible_collections", "local", "llm",
-                                "plugins", "module_utils"))
+sys.path.insert(0, os.path.join(ROOT, "plugins", "module_utils"))
 
 import llm_core as L  # noqa: E402
 
-MODULE = os.path.join(ROOT, "ansible_collections", "local", "llm",
-                      "plugins", "modules", "llm_extract.py")
+MODULE = os.path.join(ROOT, "plugins", "modules", "llm_extract.py")
 
 
 def params(**overrides):
@@ -62,7 +60,8 @@ class MockGuardTest(unittest.TestCase):
 
     def test_lookup_refuses_mock_without_the_flag(self):
         from ansible.errors import AnsibleError
-        from ansible_collections.local.llm.plugins.lookup.llm_extract import LookupModule
+        sys.path.insert(0, os.path.join(ROOT, "plugins", "lookup"))
+        from llm_extract import LookupModule
 
         with self.assertRaises(AnsibleError) as ctx:
             LookupModule().run(["SerialNumber = 7XK2P13"], prompt="Extract.",

@@ -45,7 +45,7 @@
       when: journal_source | length == 0
 
     - name: 2. Ask the local 1.2B model what failed
-      local.llm.llm_extract:
+      andrewich.ai.llm_extract:
         text: "{{ journal_text }}"
         prompt_file: "{{ playbook_dir }}/../prompts/journal_triage.txt"
         fields: "{{ journal_fields }}"

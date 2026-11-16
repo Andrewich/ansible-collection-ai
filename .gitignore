@@ -6,3 +6,7 @@ vendor/
 .ansible/
 __pycache__/
 *.pyc
+
+.secrets/
+dist/
+.collections/

@@ -1,0 +1,46 @@
+---
+namespace: andrewich
+name: ai
+version: 0.4.0
+readme: README.md
+authors:
+  - Andrewich
+description: >-
+  Turn unstructured text into validated JSON with a small local GGUF model.
+  Inference stays on the host and no data leaves it; the only network contact is an
+  optional one-time HTTPS download of the model file when model_url is set.
+license:
+  - GPL-3.0-or-later
+license_file: LICENSE
+tags:
+  - llm
+  - gguf
+  - extraction
+  - redfish
+  - json
+  - local
+repository: https://github.com/Andrewich/ansible-collection-ai
+documentation: https://github.com/Andrewich/ansible-collection-ai/blob/main/docs/contract.md
+homepage: https://github.com/Andrewich/ansible-collection-ai
+issues: https://github.com/Andrewich/ansible-collection-ai/issues
+dependencies: {}
+build_ignore:
+  - .git
+  - .github
+  - .gitignore
+  - .ansible
+  - .venv
+  - .pylib
+  - .models
+  - .collections
+  - .tmp
+  - .secrets
+  - vendor
+  - dist
+  - "*.tar.gz"
+  - "*.pyc"
+  - __pycache__
+  - ansible.cfg
+  - inventory.ini
+  - inventory
+  - tests

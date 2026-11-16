@@ -1,4 +1,4 @@
-"""Core of the ``local.llm`` collection: unstructured text -> JSON via a local GGUF model.
+"""Core of the ``andrewich.ai`` collection: unstructured text -> JSON via a local GGUF model.
 
 Deliberately free of Ansible imports so that the module, the lookup plugin and the unit
 tests share exactly one implementation.

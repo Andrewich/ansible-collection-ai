@@ -1,4 +1,4 @@
-# Контракт `local.llm.llm_extract`
+# Контракт `andrewich.ai.llm_extract`
 
 Статус: версия ядра **2.1**, коллекция **0.3.0**. Закрыты P0/P1 ревью и находки,
 которые ревью не выявило (§15). Часть замечаний сознательно вне объёма (§16).
@@ -18,9 +18,9 @@ ansible_collections/local/llm/
 ```
 
 ```yaml
-- local.llm.llm_extract:            # факты хоста
+- andrewich.ai.llm_extract:            # факты хоста
 - set_fact:
-    parsed: "{{ lookup('local.llm.llm_extract', payload, prompt_file=..., fields=...) }}"
+    parsed: "{{ lookup('andrewich.ai.llm_extract', payload, prompt_file=..., fields=...) }}"
 ```
 
 ## 2. Конвейер

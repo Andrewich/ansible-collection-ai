@@ -12,10 +12,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-MODULE_PATH = os.path.join(ROOT, "ansible_collections", "local", "llm",
-                           "plugins", "modules", "llm_extract.py")
-sys.path.insert(0, os.path.join(ROOT, "ansible_collections", "local", "llm",
-                                "plugins", "module_utils"))
+MODULE_PATH = os.path.join(ROOT, "plugins", "modules", "llm_extract.py")
+sys.path.insert(0, os.path.join(ROOT, "plugins", "module_utils"))
 
 import llm_core as L  # noqa: E402
 

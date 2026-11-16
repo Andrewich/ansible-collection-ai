@@ -266,7 +266,7 @@ notes:
     against the schema and asserting on the values you rely on.
 seealso:
   - description: The same engine as a lookup plugin.
-    module: local.llm.llm_extract
+    module: andrewich.ai.llm_extract
 author:
   - Sysadmin toolkit
 """
@@ -281,7 +281,7 @@ EXAMPLES = r"""
   register: payload
 
 - name: Normalise the vendor payload
-  local.llm.llm_extract:
+  andrewich.ai.llm_extract:
     text: "{{ payload.content }}"
     prompt_file: prompts/redfish_extract.txt
     fields: "{{ lookup('file', 'vars/redfish_fields.yml') | from_yaml }}"
@@ -290,7 +290,7 @@ EXAMPLES = r"""
   register: extracted
 
 - name: Same, but let the module fetch the model once into its cache
-  local.llm.llm_extract:
+  andrewich.ai.llm_extract:
     text: "{{ payload.content }}"
     prompt_file: prompts/redfish_extract.txt
     fields: "{{ lookup('file', 'vars/redfish_fields.yml') | from_yaml }}"
@@ -333,9 +333,19 @@ plan:
   type: dict
 """
 
+import os
+import sys
+
 from ansible.module_utils.basic import AnsibleModule
 
-from ansible_collections.local.llm.plugins.module_utils import llm_core as core
+try:
+    from ansible_collections.andrewich.ai.plugins.module_utils import llm_core as core
+except ImportError:  # source checkout, e.g. module run directly by the tests
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "module_utils"),
+    )
+    import llm_core as core
 
 
 def main():

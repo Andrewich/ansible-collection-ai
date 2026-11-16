@@ -5,7 +5,7 @@
 """Filter: reduce a Redfish payload to identity lines, keeping each value's path.
 
     - set_fact:
-        lines: "{{ payload_text | local.llm.redfish_identity }}"
+        lines: "{{ payload_text | andrewich.ai.redfish_identity }}"
 
 Why a filter and not pure Jinja: the values that must be told apart (the system
 manufacturer "FUJITSU" versus the mainboard vendor "MiTAC") differ only by nesting
@@ -47,7 +47,7 @@ DOCUMENTATION = r"""
 EXAMPLES = r"""
 - name: Compact the payload inside the playbook, no external tools
   ansible.builtin.set_fact:
-    identity: "{{ payload_text | local.llm.redfish_identity }}"
+    identity: "{{ payload_text | andrewich.ai.redfish_identity }}"
 """
 
 RETURN = r"""

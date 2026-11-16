@@ -7,8 +7,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(ROOT, "ansible_collections", "local", "llm",
-                                "plugins", "filter"))
+sys.path.insert(0, os.path.join(ROOT, "plugins", "filter"))
 
 import redfish_identity as R  # noqa: E402
 

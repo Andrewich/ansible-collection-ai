@@ -18,7 +18,7 @@
 
   tasks:
     - name: 1. Raw Redfish payload is far over the budget of a 350M model
-      local.llm.llm_extract:
+      andrewich.ai.llm_extract:
         src: "{{ playbook_dir }}/../fixtures/dell_r750.json"
         prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
         fields: "{{ redfish_fields }}"
@@ -38,7 +38,7 @@
     # "path = value" lines by whatever the caller prefers (jq, a filter, a script).
     # 294 characters are enough for the 350M model to get all ten facts right.
     - name: 2. Pre-compacted payload is extracted with the real model
-      local.llm.llm_extract:
+      andrewich.ai.llm_extract:
         src: "{{ playbook_dir }}/../fixtures/dell_r750_compact.txt"
         prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
         fields: "{{ redfish_fields }}"
@@ -79,7 +79,7 @@
         state: absent
 
     - name: First run with caching enabled fills the cache
-      local.llm.llm_extract:
+      andrewich.ai.llm_extract:
         src: "{{ playbook_dir }}/../fixtures/dell_r750_compact.txt"
         prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
         fields: "{{ redfish_fields }}"
@@ -90,7 +90,7 @@
       register: cached_first
 
     - name: Second run does no inference at all
-      local.llm.llm_extract:
+      andrewich.ai.llm_extract:
         src: "{{ playbook_dir }}/../fixtures/dell_r750_compact.txt"
         prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
         fields: "{{ redfish_fields }}"
@@ -109,7 +109,7 @@
           - cached.ansible_facts.llm_result == extracted.ansible_facts.llm_result
 
     - name: 4. Different domain - nginx error line, nested schema, mock backend
-      local.llm.llm_extract:
+      andrewich.ai.llm_extract:
         text: >-
           2024/11/05 11:02:31 [error] 1234#0: *88 upstream timed out (110: Connection timed
           out) while reading response header from upstream, client: 10.1.2.3,
@@ -138,7 +138,7 @@
           - nginx.llm.unverified | map(attribute='path') | list == ['category']
 
     - name: 5. Same module, third domain - support ticket classification
-      local.llm.llm_extract:
+      andrewich.ai.llm_extract:
         text: "После обновления прошивки сервер не включается, LED мигает оранжевым."
         prompt_file: "{{ playbook_dir }}/../prompts/ticket_route.txt"
         fields:
@@ -163,7 +163,7 @@
           - ticket.llm.unverified == []
 
     - name: 6. A schema violation is reported, not silently accepted
-      local.llm.llm_extract:
+      andrewich.ai.llm_extract:
         text: "SerialNumber = 7XK2P13"
         prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
         fields: "{{ redfish_fields }}"
@@ -182,7 +182,7 @@
     # The reviewer's acid test: a document that simply does not contain most of the
     # fields. The model must answer null, not copy a nearby value into the gap.
     - name: 7. Document that lacks most of the fields
-      local.llm.llm_extract:
+      andrewich.ai.llm_extract:
         text: "SerialNumber = 7XK2P13\nMemory = 512 GB\n"
         prompt_file: "{{ playbook_dir }}/../prompts/redfish_extract.txt"
         fields: "{{ redfish_fields }}"
@@ -215,7 +215,7 @@
     - name: 8. Same engine as a lookup, no facts involved
       set_fact:
         looked_up: >-
-          {{ lookup('local.llm.llm_extract',
+          {{ lookup('andrewich.ai.llm_extract',
                     'SerialNumber = 7XK2P13',
                     prompt='Extract the serial number.',
                     fields=[{'name': 'serial', 'type': 'string'}],

@@ -2,12 +2,12 @@
 # Copyright: (c) 2026
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-"""lookup(local.llm.llm_extract) - text -> JSON, computed inline in a template.
+"""lookup(andrewich.ai.llm_extract) - text -> JSON, computed inline in a template.
 
 Same engine as the module, without facts and without delegate_to:
 
     - debug:
-        msg: "{{ lookup('local.llm.llm_extract', payload,
+        msg: "{{ lookup('andrewich.ai.llm_extract', payload,
                         prompt_file='prompts/redfish_extract.txt',
                         fields=fields) }}"
 
@@ -24,7 +24,7 @@ DOCUMENTATION = r"""
 name: llm_extract
 short_description: Turn unstructured text into JSON with a local GGUF model
 description:
-  - Runs the same engine as the C(local.llm.llm_extract) module but returns the value to the
+  - Runs the same engine as the C(andrewich.ai.llm_extract) module but returns the value to the
     template, which is the natural form for "compute a variable" tasks.
   - The first positional term is the text; every module option can be passed as a keyword
     argument.
@@ -169,14 +169,14 @@ EXAMPLES = r"""
 - name: Extract facts in a template, without touching ansible_facts
   set_fact:
     hardware: >-
-      {{ lookup('local.llm.llm_extract', payload,
+      {{ lookup('andrewich.ai.llm_extract', payload,
                 prompt_file='prompts/redfish_extract.txt',
                 fields=redfish_fields,
                 model_path='/opt/llm/models/LFM2-350M-Extract-Q4_K_M.gguf') }}
 
 - name: Use it directly in a message
   debug:
-    msg: "serial={{ lookup('local.llm.llm_extract', text, fields=[{'name': 'serial', 'type': 'string'}], prompt='Extract the serial number.', backend='mock', mock_response='{\"serial\": \"ABC\"}')['serial'] }}"
+    msg: "serial={{ lookup('andrewich.ai.llm_extract', text, fields=[{'name': 'serial', 'type': 'string'}], prompt='Extract the serial number.', backend='mock', mock_response='{\"serial\": \"ABC\"}')['serial'] }}"
 """
 
 RETURN = r"""
@@ -194,7 +194,7 @@ from ansible.plugins.lookup import LookupBase
 
 # Reuse the collection's module_utils even when the lookup runs from a checkout.
 try:
-    from ansible_collections.local.llm.plugins.module_utils import llm_core as core
+    from ansible_collections.andrewich.ai.plugins.module_utils import llm_core as core
 except ImportError:  # pragma: no cover - only for ad-hoc imports in tests
     _here = os.path.dirname(os.path.abspath(__file__))
     sys.path.insert(0, os.path.join(os.path.dirname(_here), "module_utils"))
@@ -224,19 +224,19 @@ class LookupModule(LookupBase):
 
         if terms:
             if len(terms) > 1:
-                raise AnsibleError("local.llm.llm_extract: exactly one text term is expected")
+                raise AnsibleError("andrewich.ai.llm_extract: exactly one text term is expected")
             params["text"] = terms[0]
         if not params.get("text") and not params.get("src"):
-            raise AnsibleError("local.llm.llm_extract: pass the text as a term, or use text=/src=")
+            raise AnsibleError("andrewich.ai.llm_extract: pass the text as a term, or use text=/src=")
 
         try:
             core.validate_params(params, strict_unknown=True)
         except core.ContractError as exc:
-            raise AnsibleError("local.llm.llm_extract: %s" % exc.message)
+            raise AnsibleError("andrewich.ai.llm_extract: %s" % exc.message)
 
         if params.get("on_invalid") == "return_raw":
             raise AnsibleError(
-                "local.llm.llm_extract: on_invalid=return_raw is not supported by the lookup; "
+                "andrewich.ai.llm_extract: on_invalid=return_raw is not supported by the lookup; "
                 "use the module when you need the raw model output"
             )
 
@@ -244,21 +244,21 @@ class LookupModule(LookupBase):
             data, meta = core.extract(params)
         except core.ContractError as exc:
             raise AnsibleError(
-                "local.llm.llm_extract: %s (error_code: %s)" % (exc.message, exc.code)
+                "andrewich.ai.llm_extract: %s (error_code: %s)" % (exc.message, exc.code)
             )
         except core.BackendError as exc:
             raise AnsibleError(
-                "local.llm.llm_extract: %s (error_code: %s)" % (exc.message, exc.code)
+                "andrewich.ai.llm_extract: %s (error_code: %s)" % (exc.message, exc.code)
             )
 
         if not meta.get("ok"):
             raise AnsibleError(
-                "local.llm.llm_extract: the model answer was rejected (%s)"
+                "andrewich.ai.llm_extract: the model answer was rejected (%s)"
                 % ", ".join(meta.get("errors") or ["invalid output"])
             )
         if meta.get("unverified"):
             self._display.warning(
-                "local.llm.llm_extract: %d extracted value(s) not found in the source: %s"
+                "andrewich.ai.llm_extract: %d extracted value(s) not found in the source: %s"
                 % (len(meta["unverified"]),
                    ", ".join(item["path"] for item in meta["unverified"]))
             )

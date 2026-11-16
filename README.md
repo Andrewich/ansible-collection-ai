@@ -1,4 +1,4 @@
-# `local.llm` — текст → JSON локальной LLM
+# `andrewich.ai` — текст → JSON локальной LLM
 
 Ansible-коллекция: модуль и lookup-плагин, которые превращают неструктурированный текст
 в JSON по заданной схеме с помощью маленькой GGUF-модели, запущенной локально.
@@ -36,7 +36,7 @@ python3 -m venv .venv
 
 ```yaml
 - name: redfish -> facts
-  local.llm.llm_extract:
+  andrewich.ai.llm_extract:
     text: "{{ payload.content }}"
     prompt_file: prompts/redfish_extract.txt
     fields: "{{ lookup('file', 'vars/redfish_fields.yml') | from_yaml }}"
@@ -53,7 +53,7 @@ python3 -m venv .venv
 - name: то же самое в шаблоне, без facts и delegate_to
   set_fact:
     parsed: >-
-      {{ lookup('local.llm.llm_extract', payload,
+      {{ lookup('andrewich.ai.llm_extract', payload,
                 prompt_file='prompts/nginx_error_classify.txt',
                 json_schema=nginx_schema) }}
 ```
@@ -121,7 +121,7 @@ python3 -m venv .venv
 Модель не обязательно класть на диск руками:
 
 ```yaml
-- local.llm.llm_extract:
+- andrewich.ai.llm_extract:
     text: "{{ payload }}"
     prompt_file: prompts/redfish_extract.txt
     fields: "{{ fields }}"
@@ -143,7 +143,7 @@ python3 -m venv .venv
 > **Первый запуск на большом парке.** Модель 219 МБ. Если её нет на контроллере, первый
 > плейбук скачает её один раз, но при `forks: 50` десятки задач одновременно встанут в
 > ожидание блокировки, а суммарное время вырастет. Сделайте отдельный прогревающий play с
-> `throttle: 1` (или одним `local.llm.llm_extract` на `localhost`), а рабочие прогоны
+> `throttle: 1` (или одним `andrewich.ai.llm_extract` на `localhost`), а рабочие прогоны
 > запускайте после него — тогда все задачи увидят готовый файл.
 
 ## Бэкенды
