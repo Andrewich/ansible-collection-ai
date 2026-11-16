@@ -145,7 +145,6 @@ docs/contract.ru.md        то же по-русски
 plugins/module_utils/      llm_core.py — грамматика, проверки, кэш, бэкенды
 plugins/modules/           llm_extract.py — тонкая обёртка AnsibleModule
 plugins/lookup/            llm_extract.py — то же ядро для шаблонов
-plugins/filter/            redfish_identity.py — компакция Redfish без jq/awk
 prompts/                   инструкции для модели, версионируются
 schemas/                   JSON Schema для вложенных структур
 vars/                      доменные схемы фактов (Redfish)
@@ -158,7 +157,7 @@ scripts/                   скачивание модели, llama-server, сб
 ## Разработка
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -p 'test_*.py'   # 197 тестов
+.venv/bin/python -m unittest discover -s tests -p 'test_*.py'   # 190 тестов
 ./scripts/build-and-install.sh                                   # сборка + установка в ./.collections
 ./scripts/run-playbook.sh playbooks/introspect_llm_extract.yml   # сквозная проверка, реальная модель + mock
 ```

@@ -14,7 +14,6 @@ andrewich.ai (корень репозитория = корень коллекц�
   plugins/module_utils/llm_core.py    # всё ядро: грамматика, проверки, кэш, бэкенды
   plugins/modules/llm_extract.py      # тонкая обёртка: DOCUMENTATION + AnsibleModule
   plugins/lookup/llm_extract.py       # то же ядро для шаблонов
-  plugins/filter/redfish_identity.py  # компакция Redfish в "путь = значение" (без внешних утилит)
   README.md / README.ru.md
   docs/contract.md, docs/contract.ru.md
 ```
@@ -240,7 +239,7 @@ llm:
 
 ```
 .venv/bin/python -m unittest discover -s tests -p 'test_*.py'
-→ Ran 197 tests ... OK
+→ Ran 190 tests ... OK
 
 ./scripts/build-and-install.sh
 ./scripts/run-playbook.sh playbooks/introspect_llm_extract.yml

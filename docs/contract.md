@@ -14,7 +14,6 @@ andrewich.ai (the repository root is the collection root)
   plugins/module_utils/llm_core.py    # the whole core: grammar, checks, cache, backends
   plugins/modules/llm_extract.py      # thin wrapper: DOCUMENTATION + AnsibleModule
   plugins/lookup/llm_extract.py       # the same core for templates
-  plugins/filter/redfish_identity.py  # Redfish "path = value" compaction (example, no external tools)
   README.md / README.ru.md
   docs/contract.md, docs/contract.ru.md
 ```
@@ -240,7 +239,7 @@ llama.cpp failures never surface as tracebacks: an incompatible or corrupt model
 
 ```
 .venv/bin/python -m unittest discover -s tests -p 'test_*.py'
-→ Ran 197 tests ... OK
+→ Ran 190 tests ... OK
 
 ./scripts/build-and-install.sh
 ./scripts/run-playbook.sh playbooks/introspect_llm_extract.yml
