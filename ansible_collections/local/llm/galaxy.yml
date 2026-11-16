@@ -7,7 +7,8 @@ authors:
   - Sysadmin toolkit
 description: >-
   Turn unstructured text into validated JSON with a small local GGUF model.
-  No external service, no data egress.
+  Inference stays on the host and no data leaves it; the only network contact is an
+  optional one-time HTTPS download of the model file when model_url is set.
 license:
   - GPL-3.0-or-later
 tags:
