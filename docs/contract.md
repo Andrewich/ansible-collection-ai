@@ -226,6 +226,10 @@ llm:
 `insufficient_space`, `model_checksum_mismatch`, `model_checksum_required`, `model_invalid`,
 `model_stale`.
 
+Сбои llama.cpp не выходят наружу трейсбеком: несовместимый или битый файл модели даёт
+`model_invalid` с версией llama-cpp-python в сообщении, а переполнение `n_ctx` — `input_too_long`
+с подсказкой поднять `n_ctx` или уменьшить `max_input_chars`.
+
 ## 14. Проверка
 
 ```

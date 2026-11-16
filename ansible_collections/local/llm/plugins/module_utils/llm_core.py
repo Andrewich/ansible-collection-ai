@@ -1160,7 +1160,17 @@ class PythonBackend(object):
             )
             if self.params.get("n_threads"):
                 kwargs["n_threads"] = self.params["n_threads"]
-            self._llm = self._llama_cpp.Llama(**kwargs)
+            try:
+                self._llm = self._llama_cpp.Llama(**kwargs)
+            except Exception as exc:
+                raise BackendError(
+                    "model_invalid",
+                    "cannot load model %s with llama-cpp-python %s: %s. The file may be "
+                    "truncated, or its architecture may be newer than this build supports; "
+                    "check the file and the llama-cpp-python version."
+                    % (self.params["model_path"],
+                       getattr(self._llama_cpp, "__version__", "unknown"), exc),
+                )
         return self._llm
 
     def _grammar(self, gbnf):
@@ -1171,13 +1181,23 @@ class PythonBackend(object):
     def complete(self, messages, gbnf, max_tokens, temperature, seed, timeout):
         llm = self._load()
         started = time.time()
-        result = llm.create_chat_completion(
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            seed=seed,
-            grammar=self._grammar(gbnf),
-        )
+        try:
+            result = llm.create_chat_completion(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                seed=seed,
+                grammar=self._grammar(gbnf),
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if "context window" in message or "exceed" in message:
+                raise BackendError(
+                    "input_too_long",
+                    "the prompt does not fit into n_ctx=%s: %s. Raise n_ctx or lower "
+                    "max_input_chars." % (self.params.get("n_ctx"), message),
+                )
+            raise BackendError("backend_unavailable", "llama.cpp failed: %s" % message)
         if time.time() - started > timeout:
             raise BackendError("timeout", "inference exceeded the %ss timeout" % timeout)
         choice = result["choices"][0]
