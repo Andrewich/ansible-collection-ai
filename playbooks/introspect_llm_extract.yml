@@ -12,7 +12,40 @@
   gather_facts: false
   vars:
     model_path: "{{ llm_model }}"
-    redfish_fields: "{{ lookup('file', playbook_dir + '/../vars/redfish_fields.yml') | from_yaml }}"
+    redfish_fields:
+      - name: vendor
+        type: string
+        description: "Server manufacturer, one of Dell, HPE, Lenovo, Supermicro, Inspur, Huawei"
+        enum: ["Dell", "HPE", "Lenovo", "Supermicro", "Inspur", "Huawei", "Other"]
+      - name: model
+        type: string
+        description: "Server model or product name, for example PowerEdge R750"
+      - name: serial
+        type: string
+        description: "Serial number, service tag or product serial of the server, not of the BMC"
+      - name: bios_version
+        type: string
+        description: "System BIOS firmware version"
+      - name: bmc_firmware
+        type: string
+        description: "BMC / iDRAC / iLO / XCC management controller firmware version"
+      - name: cpu_model
+        type: string
+        description: "CPU model of the installed processors"
+      - name: cpu_cores_total
+        type: integer
+        description: "Total number of physical CPU cores in the whole server, not logical processors"
+      - name: memory_gib
+        type: integer
+        description: "Total installed RAM in GiB, integer number without units"
+      - name: power_state
+        type: string
+        description: "Chassis power state"
+        enum: ["On", "Off"]
+      - name: health
+        type: string
+        description: "Overall hardware health reported by the BMC"
+        enum: ["OK", "Warning", "Critical"]
     nginx_schema: "{{ lookup('file', playbook_dir + '/../schemas/nginx_error.json') | from_json }}"
     cache_dir: "{{ playbook_dir }}/../.tmp/llm-cache"
 

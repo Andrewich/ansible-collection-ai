@@ -239,8 +239,10 @@ class P1AliasesTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "schema_invalid")
         self.assertIn("aliases", str(ctx.exception))
 
-    def test_domain_vars_have_no_aliases(self):
-        with open(os.path.join(ROOT, "vars", "redfish_fields.yml"), encoding="utf-8") as handle:
+    def test_shipped_example_fields_have_no_aliases(self):
+        # The example playbook carries the Redfish schema now; it must not rely on aliases.
+        with open(os.path.join(ROOT, "playbooks", "introspect_llm_extract.yml"),
+                  encoding="utf-8") as handle:
             self.assertNotIn("aliases:", handle.read())
 
 

@@ -284,7 +284,7 @@ EXAMPLES = r"""
   andrewich.ai.llm_extract:
     text: "{{ payload.content }}"
     prompt_file: prompts/redfish_extract.txt
-    fields: "{{ lookup('file', 'vars/redfish_fields.yml') | from_yaml }}"
+    fields: "{{ redfish_fields }}"   # list of name/type/description items
     model_path: /opt/llm/models/LFM2-350M-Extract-Q4_K_M.gguf
   delegate_to: localhost
   register: extracted
@@ -293,7 +293,7 @@ EXAMPLES = r"""
   andrewich.ai.llm_extract:
     text: "{{ payload.content }}"
     prompt_file: prompts/redfish_extract.txt
-    fields: "{{ lookup('file', 'vars/redfish_fields.yml') | from_yaml }}"
+    fields: "{{ redfish_fields }}"   # list of name/type/description items
     model_url: https://huggingface.co/LiquidAI/LFM2-350M-Extract-GGUF/resolve/main/LFM2-350M-Extract-Q4_K_M.gguf
     model_sha256: 687a31c3e7864647aa181e1feb156e4e5da33978c174d7dbf0d289f6014a5621
     strict_download: true

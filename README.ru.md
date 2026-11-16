@@ -53,7 +53,7 @@ python3 -m venv .venv
   andrewich.ai.llm_extract:
     text: "{{ payload.content }}"
     prompt_file: prompts/redfish_extract.txt
-    fields: "{{ lookup('file', 'vars/redfish_fields.yml') | from_yaml }}"
+    fields: "{{ redfish_fields }}"   # список элементов name/type/description
     model_url: https://huggingface.co/LiquidAI/LFM2-350M-Extract-GGUF/resolve/main/LFM2-350M-Extract-Q4_K_M.gguf
     model_sha256: 687a31c3e7864647aa181e1feb156e4e5da33978c174d7dbf0d289f6014a5621
     strict_download: true
@@ -147,7 +147,6 @@ plugins/modules/           llm_extract.py — тонкая обёртка Ansibl
 plugins/lookup/            llm_extract.py — то же ядро для шаблонов
 prompts/                   инструкции для модели, версионируются
 schemas/                   JSON Schema для вложенных структур
-vars/                      доменные схемы фактов (Redfish)
 fixtures/                  реальные payload-ы (Dell, HPE, Inspur, Huawei, Fujitsu)
 playbooks/                 сквозные примеры
 tests/                     unit-тесты, без сети и без модели
