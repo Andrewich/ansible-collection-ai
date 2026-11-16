@@ -48,8 +48,29 @@ options:
     description: Full JSON Schema.
     type: dict
   model_path:
-    description: GGUF model.
+    description: GGUF model path.
     type: path
+  model_url:
+    description: HTTPS URL of a .gguf file; downloaded once into I(model_dir).
+    type: str
+  model_dir:
+    description: Directory for downloaded models (default C(<cache_dir>/models)).
+    type: path
+  model_sha256:
+    description: Expected SHA-256 of the model file.
+    type: str
+  strict_download:
+    description: Refuse to download without I(model_sha256).
+    type: bool
+    default: false
+  refresh:
+    description: Re-download when the local copy does not match.
+    type: bool
+    default: false
+  download_timeout:
+    description: Timeout of one download attempt, seconds.
+    type: int
+    default: 600
   backend:
     description: C(python), C(server) or C(mock).
     type: str
@@ -191,7 +212,8 @@ DEFAULTS = {
     "strict_enum": False, "cache": True, "cache_dir": None, "temperature": 0.0,
     "seed": 0, "max_tokens": 320, "retries": 1, "n_ctx": 4096, "n_threads": 0,
     "timeout": 120, "mock_response": None, "debug": False, "check_mode": False,
-    "allow_mock": False,
+    "allow_mock": False, "model_url": None, "model_dir": None, "model_sha256": None,
+    "strict_download": False, "refresh": False, "download_timeout": 600,
 }
 
 

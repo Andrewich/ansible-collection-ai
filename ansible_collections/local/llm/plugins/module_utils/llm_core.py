@@ -56,6 +56,14 @@ ERROR_CODES = (
     "input_encoding",
     "invalid_server_url",
     "mock_not_allowed",
+    "download_failed",
+    "download_timeout",
+    "download_busy",
+    "insufficient_space",
+    "model_checksum_mismatch",
+    "model_checksum_required",
+    "model_invalid",
+    "model_stale",
     "invalid_params",
     "timeout",
 )
@@ -97,9 +105,10 @@ INT_PARAMS = {
     "timeout": 1,
     "retries": 0,
     "n_threads": 0,
+    "download_timeout": 1,
 }
 
-BOOL_PARAMS = ("strict_enum", "cache", "debug", "allow_mock")
+BOOL_PARAMS = ("strict_enum", "cache", "debug", "allow_mock", "strict_download", "refresh")
 
 KNOWN_PARAMS = frozenset(
     [
@@ -108,7 +117,8 @@ KNOWN_PARAMS = frozenset(
         "on_too_long", "merge", "on_missing", "on_invalid", "grounding", "on_ungrounded",
         "min_grounded", "strict_enum", "cache", "cache_dir", "temperature", "seed",
         "max_tokens", "retries", "n_ctx", "n_threads", "timeout", "mock_response", "debug",
-        "check_mode", "allow_mock",
+        "check_mode", "allow_mock", "model_url", "model_dir", "model_sha256",
+        "strict_download", "refresh", "download_timeout",
     ]
 )
 
@@ -160,6 +170,28 @@ def validate_params(params, strict_unknown=False):
         if all(params.get(name) is None for name in group):
             errors.append("one of %s is required" % ", ".join(group))
 
+    model_url = params.get("model_url")
+    model_path = params.get("model_path")
+    if model_url is not None and model_path is not None:
+        errors.append("model_url and model_path are mutually exclusive")
+    if model_url is not None:
+        parsed_url = urllib.parse.urlsplit(str(model_url))
+        if parsed_url.scheme != "https":
+            errors.append(
+                "model_url must be an https:// URL to a .gguf file, got %r" % model_url
+            )
+        elif not parsed_url.path.lower().endswith(".gguf"):
+            errors.append("model_url must point to a .gguf file, got %r" % model_url)
+        if params.get("backend") == "server":
+            errors.append(
+                "model_url is only used by backend 'python'; backend 'server' loads the "
+                "model itself"
+            )
+    if params.get("model_sha256") is not None:
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", str(params["model_sha256"])):
+            errors.append("model_sha256 must be a 64 character hex digest")
+    if params.get("backend") == "python" and not (model_path or model_url):
+        errors.append("backend 'python' needs model_path or model_url")
     if params.get("fields") is not None and not isinstance(params["fields"], list):
         errors.append("fields must be a list")
     if params.get("json_schema") is not None and not isinstance(params["json_schema"], (dict, str)):
@@ -171,6 +203,12 @@ def validate_params(params, strict_unknown=False):
 
     if errors:
         raise ContractError("invalid_params", "; ".join(errors))
+    if params.get("strict_download") and not params.get("model_sha256"):
+        raise ContractError(
+            "model_checksum_required",
+            "strict_download requires model_sha256: without a digest an interrupted or "
+            "tampered download cannot be detected",
+        )
 
 
 class ContractError(Exception):

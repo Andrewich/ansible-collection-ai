@@ -86,8 +86,42 @@ options:
     type: str
     default: llm_result
   model_path:
-    description: Path to the GGUF model file. Required for the C(python) backend.
+    description:
+      - Path to the GGUF model file. Required for the C(python) backend unless I(model_url)
+        is set.
+      - Mutually exclusive with I(model_url).
     type: path
+  model_url:
+    description:
+      - Direct HTTPS URL of a C(.gguf) file. The module downloads it once into I(model_dir)
+        and reuses the local copy afterwards.
+      - Using this option is itself the consent to make one network request; there is no
+        separate switch. Only the C(python) backend can download, because C(server) loads
+        the model itself.
+      - Mutually exclusive with I(model_path).
+    type: str
+  model_dir:
+    description: Directory for downloaded models. Defaults to C(<cache_dir>/models).
+    type: path
+  model_sha256:
+    description:
+      - Expected SHA-256 of the model file. Strongly recommended; without it a truncated
+        download can only be detected by the GGUF magic and the Content-Length.
+    type: str
+  strict_download:
+    description: Refuse to download without I(model_sha256) (C(model_checksum_required)).
+    type: bool
+    default: false
+  refresh:
+    description:
+      - Re-download the model when the local copy does not match the recorded size or hash.
+      - Without it a mismatch is an error (C(model_stale)).
+    type: bool
+    default: false
+  download_timeout:
+    description: Timeout of one download attempt, in seconds.
+    type: int
+    default: 600
   model_id:
     description: Identifier used in the cache key and in the result metadata.
     type: str
@@ -310,6 +344,12 @@ def main():
             json_schema=dict(type="dict"),
             result_key=dict(type="str", default="llm_result"),
             model_path=dict(type="path"),
+            model_url=dict(type="str"),
+            model_dir=dict(type="path"),
+            model_sha256=dict(type="str"),
+            strict_download=dict(type="bool", default=False),
+            refresh=dict(type="bool", default=False),
+            download_timeout=dict(type="int", default=600),
             model_id=dict(type="str"),
             backend=dict(type="str", default="python", choices=["python", "server", "mock"]),
             server_url=dict(type="str", default="http://127.0.0.1:8080"),
@@ -336,9 +376,11 @@ def main():
             allow_mock=dict(type="bool", default=False),
             debug=dict(type="bool", default=False),
         ),
-        mutually_exclusive=[["text", "src"], ["prompt", "prompt_file"], ["fields", "json_schema"]],
+        mutually_exclusive=[
+            ["text", "src"], ["prompt", "prompt_file"], ["fields", "json_schema"],
+            ["model_path", "model_url"],
+        ],
         required_one_of=[["text", "src"], ["prompt", "prompt_file"], ["fields", "json_schema"]],
-        required_if=[("backend", "python", ["model_path"])],
         supports_check_mode=True,
     )
 
