@@ -15,7 +15,9 @@ description:
   - Sends a caller supplied prompt and a piece of unstructured text to a local GGUF model
     and returns JSON validated against a caller supplied schema.
   - The model runs where the module executes, normally the controller
-    (C(delegate_to=localhost)). No external service is contacted.
+    (C(delegate_to=localhost)); inference itself never leaves the host.
+  - The only network contact the module can make is a one-time HTTPS download of the GGUF
+    file, and only when I(model_url) is passed explicitly.
   - Output is constrained by a GBNF grammar generated from the schema. Nullable fields
     really can come back as C(null), so "the document does not say" is expressible and is
     reported in C(llm.missing) instead of being filled with a nearby value.
@@ -255,8 +257,11 @@ options:
     type: bool
     default: false
 notes:
-  - The model file is not shipped inside the module; it must already be present on the
-    machine that executes it.
+  - The model file is not shipped inside the module. Provide I(model_path) to an existing
+    file, or I(model_url) to let the module download it once.
+  - Downloads are HTTPS only, streamed to a private temporary file and moved into place
+    atomically; concurrent tasks are serialised with a file lock.
+  - Model files and the cache are stored under I(model_dir), default C(<cache_dir>/models).
   - The result is data. Do not pipe it into C(shell) or C(command) without validating it
     against the schema and asserting on the values you rely on.
 seealso:
@@ -283,6 +288,16 @@ EXAMPLES = r"""
     model_path: /opt/llm/models/LFM2-350M-Extract-Q4_K_M.gguf
   delegate_to: localhost
   register: extracted
+
+- name: Same, but let the module fetch the model once into its cache
+  local.llm.llm_extract:
+    text: "{{ payload.content }}"
+    prompt_file: prompts/redfish_extract.txt
+    fields: "{{ lookup('file', 'vars/redfish_fields.yml') | from_yaml }}"
+    model_url: https://huggingface.co/LiquidAI/LFM2-350M-Extract-GGUF/resolve/main/LFM2-350M-Extract-Q4_K_M.gguf
+    model_sha256: 687a31c3e7864647aa181e1feb156e4e5da33978c174d7dbf0d289f6014a5621
+    strict_download: true
+  delegate_to: localhost
 
 - name: Fail loudly when the document does not contain the facts
   assert:

@@ -48,6 +48,12 @@ text|src ─► prepare ─► [для каждого чанка: GBNF ─► ba
 | `json_schema` | dict | — | вложенные структуры, см. §4 |
 | `result_key` | str | `llm_result` | |
 | `model_path` / `model_id` | path / str | — / basename | |
+| `model_url` | str | — | HTTPS на `.gguf`; взаимоисключающ с `model_path`, сам факт передачи = согласие на скачивание |
+| `model_dir` | path | `<cache_dir>/models` | куда класть скачанные модели |
+| `model_sha256` | str | — | ожидаемый SHA-256, настоятельно рекомендуется |
+| `strict_download` | bool | `false` | требует `model_sha256` (`model_checksum_required`) |
+| `refresh` | bool | `false` | перекачать при несовпадении размера/хеша |
+| `download_timeout` | int ≥ 1 | `600` | таймаут одной попытки и ожидания lock |
 | `backend` | str | `python` | `python` / `server` / `mock` |
 | `server_url` | str | `http://127.0.0.1:8080` | **только loopback**, без редиректов и прокси |
 | `max_input_chars` | int ≥ 1 | `1200` | |
@@ -154,7 +160,36 @@ Envelope-формат v2: `{v: 2, chunks: [envelope, ...]}` — по одном�
 | `server` | OpenAI-совместимый API, грамматика в теле | **только loopback**, без прокси и редиректов |
 | `mock` | канированный ответ | только с `allow_mock: true` |
 
-## 11. Результат
+## 11. Скачивание модели
+
+Если задан `model_url`, `prepare()` скачивает модель до инференса. Это **единственный**
+сетевой контакт модуля; инференс всегда локальный.
+
+| Шаг | Поведение |
+|---|---|
+| Допустимость | только `https` и `.gguf`; `backend: python`; `model_url` и `model_path` вместе — `invalid_params` |
+| Имя файла | `<sha256(url)[:16]>-<basename>.gguf` в `model_dir` — разные URL не затирают друг друга |
+| Уже есть | совпал `model_sha256` или записанный при скачивании размер — `model.download: "cached"`, сеть не используется |
+| Не совпало | `refresh=false` → `model_stale`; `refresh=true` → перекачать |
+| `check_mode` | ничего не скачивается и не создаётся; модуль возвращает `plan_only` с планом |
+| Параллелизм | lock-файл + `fcntl.flock`; после захвата — повторная проверка файла, поэтому качает один процесс |
+| Место | `os.statvfs` с запасом ×1.1 → `insufficient_space` |
+| Запись | чанки ~1 МБ в `mkstemp` (0600) → `fsync` → `os.replace`; в память файл не читается |
+| Целостность | первые 4 байта `GGUF` (`model_invalid`), сверка `Content-Length` (`download_failed`), SHA-256 потоково (`model_checksum_mismatch`); битый файл удаляется |
+| Ретраи | 3 попытки с backoff на сетевые ошибки; таймаут → `download_timeout`, исчерпание → `download_failed` |
+| Метаданные | `llm.model`: `download` (`fresh` / `cached` / `skipped` / `false`), `url`, `sha256`, `bytes`, `seconds`; рядом с файлом кладётся `<name>.meta.json` (0600) |
+
+`model_sha256` не задан — в `llm.warnings` попадает предупреждение: без хеша от подмены или
+обрыва защищают только магия GGUF и `Content-Length`. `strict_download: true` превращает
+это в отказ `model_checksum_required`.
+
+**Доверие к URL.** Ссылка должна вести на файл в закреплённой ревизии (тег, коммит,
+конкретная версия), а не на `main`/`latest`: содержимое по плавающему адресу может
+измениться, и тогда либо сработает `model_stale`, либо (без `model_sha256`) будет тихо
+использована другая модель. Модуль не ходит в HF API, не поддерживает `hf:org/repo`,
+токены и gated-модели — только прямой HTTPS-URL.
+
+## 12. Результат
 
 ```yaml
 ansible_facts:
@@ -181,19 +216,21 @@ llm:
 При `ok: false` модуль **не возвращает** `ansible_facts` (не затирает прежнее значение),
 а lookup всегда бросает ошибку.
 
-## 12. Ошибки
+## 13. Ошибки
 
 `invalid_params`, `input_empty`, `input_not_found`, `input_unreadable`, `input_encoding`,
 `input_too_long`, `prompt_not_found`, `schema_invalid`, `schema_unsupported`,
 `model_not_found`, `backend_unavailable`, `invalid_server_url`, `mock_not_allowed`,
 `invalid_json`, `schema_violation`, `missing_fields`, `grounding_failed`,
-`ungrounded_values`, `timeout`.
+`ungrounded_values`, `timeout`, `download_failed`, `download_timeout`, `download_busy`,
+`insufficient_space`, `model_checksum_mismatch`, `model_checksum_required`, `model_invalid`,
+`model_stale`.
 
-## 13. Проверка
+## 14. Проверка
 
 ```
 .venv/bin/python -m unittest discover -s tests -p 'test_*.py'
-→ Ran 159 tests ... OK
+→ Ran 192 tests ... OK
 
 ./scripts/run-playbook.sh playbooks/introspect_llm_extract.yml
 → PLAY RECAP: ok=20 failed=0 ignored=2
@@ -207,8 +244,10 @@ llm:
 | документ без 8 полей | 2 факта, 8 выдуманных поймано и удалено |
 | повторный прогон | `cache_hit: true`, `attempts: 0` |
 | `on_too_long: split`, 2 чанка | значения заземляются по своим чанкам |
+| скачивание модели 219 МБ по `model_url` | 2.7 с, `download: fresh`, тот же sha256, 10/10 фактов |
+| повторный запуск с тем же URL | сеть не используется, `download: cached` |
 
-## 14. Границы доверия
+## 15. Границы доверия
 
 - Промпт и схема — **доверенные артефакты**: они попадают в системное сообщение.
 - Документ — **недоверенный**: он в пользовательском сообщении, результат никогда не
@@ -216,8 +255,10 @@ llm:
   `shell`/`command`/`uri` без `assert` по схеме и значениям.
 - Дефолт `on_ungrounded: drop` и `allow_mock: false` выбраны так, чтобы случайная
   конфигурация не производила выдуманные факты.
+- `model_url` — доверенная конфигурация: он ведёт на конкретный файл в закреплённой
+  ревизии, а не на плавающую ветку; `model_sha256` фиксирует содержимое.
 
-## 15. Что закрыто
+## 16. Что закрыто
 
 | # | Замечание | Исправление |
 |---|---|---|
@@ -238,7 +279,7 @@ llm:
 | — | enum в массивах не проверялся | проверяется и нормализуется по item-правилам |
 | — | нулевой знаменатель = 1.0 | при `min_grounded > 0` и `checked == 0` — отказ |
 
-## 16. Вне объёма (осознанно)
+## 17. Вне объёма (осознанно)
 
 P0-3 (привязка значения к полю записи), P1-3 (хеш содержимого GGUF), P1-4 (коллизии путей
 `a.b`), P1-7 (жёсткий timeout в процессе), P2-1 (best-of-N), P2-4 (полный Unicode),
